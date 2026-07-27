@@ -1,0 +1,32 @@
+[project]
+name = "new-jac"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "datasets>=5.0.0",
+    "h5py>=3.16.0",
+    "matplotlib>=3.11.1",
+    "onnx>=1.22.0",
+    "onnxruntime-training>=1.19.2",
+    "onnxscript>=0.7.1",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.17.1",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
+]
+
+# onnx is installed editable from ../onnx (a local clone of github.com/onnx/onnx, pinned to
+# v1.22.0) so it can be patched directly. Rebuilding it (uv sync/lock after editing the clone)
+# requires: SKBUILD_CMAKE_DEFINE="ONNX_BUILD_CUSTOM_PROTOBUF=ON" uv sync
+# -- the system's libprotobuf.a isn't built with -fPIC, so linking onnx's Python extension
+# against it fails; that flag makes the build fetch and compile its own protobuf instead.
+# [tool.uv.sources]
+# onnx = { path = "../onnx", editable = true }
+
+# onnxruntime-training is built from source (see ort_build_logs/build_ort.sh) against CUDA
+# 12.8 for the H100 (sm_90) -- the PyPI wheel's CUDA EP is linked against CUDA 11 libs that
+# don't exist on this cluster, and PyPI has no CUDA-12 GPU build of onnxruntime-training at
+# all. This local wheel adds real bf16 CPU/CUDA kernel coverage that PyPI's build lacks.
+[tool.uv.sources]
+onnxruntime-training = { path = "ort_build_logs/wheel/onnxruntime_training-1.19.2+cu128-cp311-cp311-linux_x86_64.whl" }
