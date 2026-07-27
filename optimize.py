@@ -4,27 +4,23 @@ minimize ||f(x) - f(y)||^2, looking for a distinct point that collides with x's 
 
 Usage: from collision_opt.optimize import run_collision_opt
 """
-import sys
-from pathlib import Path
-
 import numpy as np
 import onnxruntime as ort
 from onnxruntime.training.api import CheckpointState, Module, Optimizer
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import ModelConfig
-from optimise_activations import sample_x, sample_ball
+from optimise_activations import sample_x, sample_ball_around_x
 from build_twin_graph import (
     checkpoint_path, eval_model_path, optimizer_model_path, training_model_path, y_input_name,
 )
-from post_utils import save_collision_opt_results
+from utils_post import save_collision_opt_results
 
 
 def optimize_collision(cfg: ModelConfig, sublayer_idx: int, seed: int = 0) -> dict[str, np.ndarray]:
     """Gradient-descends y (x held fixed) towards a collision with f(x), for cfg.batch
     independent (x, y) restarts at once. x is sampled once via sample_x; y0 is x perturbed by
-    collision_opt_init_perturbation (via sample_ball). Both are tiled across every seq slot
+    collision_opt_init_perturbation (via sample_ball_around_x). Both are tiled across every seq slot
     (see max_search.py's g() closure) before being written into the twin graph, which is
     itself batch/seq/d_model-shaped."""
     sublayer = cfg.sublayers[sublayer_idx]
@@ -44,24 +40,22 @@ def optimize_collision(cfg: ModelConfig, sublayer_idx: int, seed: int = 0) -> di
     optimizer.set_learning_rate(cfg.collision_opt_lr)
 
     x = sample_x(cfg, sublayer_idx, position, seed)
-    y0 = sample_ball(x, cfg.collision_opt_init_perturbation, cfg.batch, seed=seed + 1)
+    y0 = sample_ball_around_x(x, cfg.collision_opt_init_perturbation, cfg.batch, seed=seed + 1)
     state.parameters[y_input_name(sublayer)].data = np.tile(y0[:, None, :], (1, cfg.seq, 1)).astype(np.float32)
 
     x_tiled = np.tile(x[:, None, :], (1, cfg.seq, 1)).astype(np.float32)
-    print(x_tiled.shape)
-    print(y0.shape)
     model.train()
     losses = np.empty(cfg.collision_opt_steps, dtype=np.float32)
-    for step in tqdm(range(cfg.collision_opt_steps), desc=f"sublayer{sublayer_idx} collision_opt"):
+    progress = tqdm(range(cfg.collision_opt_steps), desc=f"sublayer{sublayer_idx} collision_opt")
+    for step in progress:
         loss = model(x_tiled)
         losses[step] = loss
-        print(loss)
+        progress.set_postfix(loss=float(loss))
         optimizer.step()
         model.lazy_reset_grad()
-    
+
     y_final = state.parameters[y_input_name(sublayer)].data[:, position, :]
     domain_distance_final = np.linalg.norm(y_final - x, axis=-1)
-    print(y_final.shape)
     return {
         "x": x,
         "y_final": y_final,

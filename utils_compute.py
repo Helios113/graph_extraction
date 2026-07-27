@@ -1,17 +1,11 @@
-import argparse
-import sys
-from pathlib import Path
-
-import h5py
 import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import ModelConfig, load_config
-from utils_construct import sublayer_gradient_path, build_single_pair_gradient_graph, ensure_base_model
-from post_utils import (
-    _session_options, _example_input_np, _save_activations,
+from config import ModelConfig
+from utils_construct import sublayer_gradient_path
+from utils_post import (
+    _session_options, sample_jacobian_points, _save_activations,
 )
 
 
@@ -22,16 +16,8 @@ def compute_sublayer_jacobian(
     session: ort.InferenceSession | None = None,
     disable_progress: bool = False,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Diagonal block(s) (D_MODEL x D_MODEL) of d(downstream)/d(upstream) for one sublayer,
-    computed from that sublayer's own independent gradient graph (see
-    build_single_pair_gradient_graph) rather than the full multi-pair union graph
-    jacobians/run_model.py's compute_diagonal_jacobians uses.
 
-    Same shape/argument contract as compute_diagonal_jacobians, restricted to one pair:
-    diagonal_block is (SEQ, D_MODEL, D_MODEL) if cfg.jacobian_position is None, else
-    (1, D_MODEL, D_MODEL). activations is the graph's own forward-pass outputs (e.g. the
-    sublayer's input/output tensors), keyed by graph output name, each (batch, seq, d_model).
-    """
+
     sublayer = cfg.sublayers[sublayer_idx]
     positions = range(cfg.seq) if cfg.jacobian_position is None else [cfg.jacobian_position % cfg.seq]
     num_elements = len(positions) * cfg.d_model
@@ -57,8 +43,10 @@ def compute_sublayer_jacobian(
     mask_full_np = np.zeros((num_elements, cfg.seq, cfg.d_model), dtype=np.float32)
     for row, position in enumerate(positions):
         mask_full_np[row * cfg.d_model:(row + 1) * cfg.d_model, position, :] = np.eye(cfg.d_model, dtype=np.float32)
-    example_np = example_input_np if example_input_np is not None else _example_input_np(cfg)
-    input_batch_np = np.tile(example_np, (cfg.batch,) + (1,) * (example_np.ndim - 1))
+    
+    sample_np = example_input_np if example_input_np is not None else sample_jacobian_points(cfg, sublayer_idx, 0)
+    
+    input_batch_np = np.tile(sample_np, (cfg.batch,) + (1,) * (sample_np.ndim - 1))
 
     if num_elements % cfg.batch != 0:
         raise ValueError(
@@ -75,7 +63,7 @@ def compute_sublayer_jacobian(
         fetch_names = [grad_output_name] + (forward_output_names if chunk_idx == 0 else [])
         outputs = session.run(
             fetch_names,
-            {cfg.input_name: input_batch_np, "mask": chunk_mask, "lazy_reset_grad": np.array([True])},
+            {sublayer.input: input_batch_np, "mask": chunk_mask},
         )
         out = dict(zip(fetch_names, outputs))
         full_jacobian[chunk_idx * cfg.batch:(chunk_idx + 1) * cfg.batch] = out[grad_output_name]
@@ -87,5 +75,4 @@ def compute_sublayer_jacobian(
         for row, position in enumerate(positions)
     ]).astype(np.float32)
     return diagonal_block, activations
-
 

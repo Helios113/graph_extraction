@@ -1,7 +1,3 @@
-import argparse
-import sys
-from pathlib import Path
-
 import h5py
 import numpy as np
 import onnx
@@ -10,9 +6,7 @@ from onnx import helper
 from tqdm import tqdm
 from scipy.stats import truncnorm
 
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import ModelConfig, InputSourceConfig, load_config
+from config import ModelConfig, InputSourceConfig
 
 NUM_REFINE_ROUNDS = 50
 PERTURBATION_SCALE = 1e-1
@@ -27,14 +21,12 @@ def _load_io_session(sub_graph_path):
     session_options.intra_op_num_threads = 1
     session_options.inter_op_num_threads = 1
 
-    return (
-        ort.InferenceSession(
-            model.SerializeToString(),
-            sess_options=session_options,
-            providers=["CUDAExecutionProvider","CPUExecutionProvider"],
-        )
+    return ort.InferenceSession(
+        model.SerializeToString(),
+        sess_options=session_options,
+        providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
-    
+
 
 def _wrap_bfloat16_io_with_float32(model: onnx.ModelProto) -> None:
     """Severed sub-graphs declare bf16 input/output (Qwen2's native dtype) -- ORT's Python
@@ -71,7 +63,48 @@ def _wrap_bfloat16_io_with_float32(model: onnx.ModelProto) -> None:
         out.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
 
 
-def representative_points(n_vectors: int, dim: int,
+
+
+
+def sample_points(cfg: ModelConfig, sublayer_idx: int, position: int, seed: int) -> np.ndarray:
+    src = cfg.input_source
+    if src.mode == "fixed_norm":
+        assert src.norm is not None
+        spread = src.norm_spread if src.norm_spread is not None else src.norm / 100
+        vmin, vmax = max(0.0, src.norm - spread), src.norm + spread
+        return _sample_points_with_specific_distribution(cfg.batch, cfg.d_model, src.norm, vmin, vmax, seed)
+    elif src.mode == "characteristic":
+        stats = cfg.sublayers[sublayer_idx]
+        return _sample_points_with_specific_distribution(cfg.batch, cfg.d_model, stats.mean_at(position), stats.min_at(position), stats.max_at(position), seed)
+    raise ValueError
+
+def _output_norms(session: ort.InferenceSession, input_name: str, output_name: str, candidates: np.ndarray) -> np.ndarray:
+    """Runs `candidates` (batch, seq, d_model) fp32 through the session and returns the
+    output's per-token (d_model) norm as (batch, seq) -- the seq axis is kept (not flattened)
+    since attention's causal mixing makes a position's output distribution depend on how much
+    context precedes it; the FFN sublayer is token-independent so its per-position norms are
+    all equivalent and can be pooled by the caller if desired."""
+    feed = {input_name: candidates.astype(np.float32)}
+    (out,) = session.run([output_name], feed)
+    return np.linalg.norm(out, axis=-1)
+
+
+def sample_ball_around_x(x: np.ndarray, r: float, n_samples: int, seed=None) -> np.ndarray:
+    """
+    Uniform samples (by volume) inside the ball of radius 2r centered at each x.
+    x: shape (N, d)
+    Returns: shape (N, d)
+    """
+    d = x.shape[-1]
+    rng = np.random.default_rng(seed)
+    directions = rng.normal(size=(n_samples, d))
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    # radius scaling: 2 * r * U gives uniform density over volume
+    u = rng.uniform(size=n_samples)
+    radii = r * u
+    return x[:, None] + directions * radii[:, None]
+
+def _sample_points_with_specific_distribution(n_vectors: int, dim: int,
                                 mean: float, vmin: float, vmax: float, seed:int = 0) -> np.ndarray:
     """
     Returns array of shape (n_vectors, dim) such that the norms of the
@@ -90,64 +123,6 @@ def representative_points(n_vectors: int, dim: int,
     vectors = directions * norms[:, None]
     return vectors.reshape(n_vectors, dim)
 
-
-def sample_x(cfg: ModelConfig, sublayer_idx: int, position: int, seed: int) -> np.ndarray:
-    """Draws cfg.batch points in R^d_model to probe as the sublayer's input x, at the given
-    seq position. input_source.mode = "fixed_norm" ignores the sublayer's (computed or
-    explicit) input_mean/input_min/input_max and instead concentrates ||x|| tightly around
-    input_source.norm (band width input_source.norm_spread, default norm/100) -- set norm
-    small to probe near-zero x for hidden collisions under small perturbations, or large to
-    probe a far-from-origin x. Any other mode uses the sublayer's usual activation-stats-
-    derived truncated-normal norm distribution."""
-    src = cfg.input_source
-    if src.mode == "fixed_norm":
-        assert src.norm is not None
-        spread = src.norm_spread if src.norm_spread is not None else src.norm / 100
-        vmin, vmax = max(0.0, src.norm - spread), src.norm + spread
-        return representative_points(cfg.batch, cfg.d_model, src.norm, vmin, vmax, seed)
-    stats = cfg.sublayers[sublayer_idx]
-    return representative_points(cfg.batch, cfg.d_model, stats.mean_at(position), stats.min_at(position), stats.max_at(position), seed)
-
-
-
-def _fixed_norm_perturbation_spread(src: InputSourceConfig) -> float:
-    """input_source.perturbation_spread, defaulting to norm/100. Assumes src.mode ==
-    "fixed_norm", which (per InputSourceConfig.__post_init__) guarantees src.norm is not
-    None."""
-    assert src.norm is not None
-    return src.perturbation_spread if src.perturbation_spread is not None else src.norm / 100
-
-
-
-def _output_norms(session: ort.InferenceSession, input_name: str, output_name: str, candidates: np.ndarray) -> np.ndarray:
-    """Runs `candidates` (batch, seq, d_model) fp32 through the session and returns the
-    output's per-token (d_model) norm as (batch, seq) -- the seq axis is kept (not flattened)
-    since attention's causal mixing makes a position's output distribution depend on how much
-    context precedes it; the FFN sublayer is token-independent so its per-position norms are
-    all equivalent and can be pooled by the caller if desired."""
-    feed = {input_name: candidates.astype(np.float32)}
-    (out,) = session.run([output_name], feed)
-    return np.linalg.norm(out, axis=-1)
-
-
-def sample_ball(x: np.ndarray, r: float, n_samples: int, seed=None) -> np.ndarray:
-    """
-    Uniform samples (by volume) inside the ball of radius 2r centered at each x.
-    x: shape (N, d)
-    Returns: shape (N, d)
-    """
-    d = x.shape[-1]
-    rng = np.random.default_rng(seed)
-    directions = rng.normal(size=(n_samples, d))
-    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
-    # radius scaling: 2 * r * U^(1/d) gives uniform density over volume
-    u = rng.uniform(size=n_samples)
-
-    # radii = 2*r * u ** (1.0 / d)
-
-    radii = 2 * r * u
-
-    return x + directions * radii[:, None] 
 
 
 def compute_collision_distances(
@@ -169,11 +144,9 @@ def compute_collision_distances(
     sublayer = cfg.sublayers[sublayer_idx]
     tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}_pos{position}"
     sub_graph_path = cfg.per_pair_dir / f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}_subgraph_eval.onnx"
-    session  = _load_io_session(
-        sub_graph_path
-    )
-    run_input_name,run_output_name = sublayer.input, sublayer.output
-   
+    session = _load_io_session(sub_graph_path)
+    run_input_name, run_output_name = sublayer.input, sublayer.output
+
     def g(points: np.ndarray) -> np.ndarray:
         """points: (cfg.batch, d_model) for the target position, tiled across every seq slot
         (context slots get independent draws of the same distribution -- see docstring)
@@ -190,10 +163,10 @@ def compute_collision_distances(
     distances_domain = np.empty(num_y, dtype=np.float32)
 
     for start in tqdm(range(0, num_y, cfg.batch), desc=f"{tag} collision search"):
-       y = sample_ball(x, g_max, cfg.batch)
-       f_y = y + g(y)
-       distances_image[start:start+cfg.batch] = np.linalg.norm(f_y-f_x, axis=-1).reshape(-1)
-       distances_domain[start:start+cfg.batch] = np.linalg.norm(y-x, axis=-1).reshape(-1)
+        y = sample_ball_around_x(x, g_max, cfg.batch)
+        f_y = y + g(y)
+        distances_image[start:start + cfg.batch] = np.linalg.norm(f_y - f_x, axis=-1).reshape(-1)
+        distances_domain[start:start + cfg.batch] = np.linalg.norm(y - x, axis=-1).reshape(-1)
 
     float32_eps = np.finfo(np.float32).eps
     n_near_zero = int(np.count_nonzero(distances_image <= float32_eps))
@@ -214,7 +187,7 @@ def compute_collision_distances(
 def compute_max_norm(
     cfg: ModelConfig,
     disable_progress: bool = False,
-    seed:int = 0
+    seed: int = 0,
 ) -> dict[str, float]:
     """For each sublayer and each seq position, searches the sphere of radius x_norm in
     d_model space for the input that maximizes that position's sublayer-subgraph output
@@ -244,9 +217,7 @@ def compute_max_norm(
     for sublayer_idx, sublayer in enumerate(cfg.sublayers):
         base_tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
         sub_graph_path = cfg.per_pair_dir / f"{base_tag}_subgraph_eval.onnx"
-        session = _load_io_session(
-            sub_graph_path
-        )
+        session = _load_io_session(sub_graph_path)
         run_input_name, run_output_name = sublayer.input, sublayer.output
 
         for position in range(cfg.seq):
@@ -271,7 +242,7 @@ def compute_max_norm(
                     # since the ORT eval session has no gradients.
                     noise = rng.standard_normal((cfg.batch, cfg.d_model)) * x_norm
                     perturbed = best_point[None, :] + noise
-                    perturbed = perturbed / np.linalg.norm(perturbed, axis=-1, keepdims=True) *PERTURBATION_SCALE* x_norm
+                    perturbed = perturbed / np.linalg.norm(perturbed, axis=-1, keepdims=True) * PERTURBATION_SCALE * x_norm
                     perturbed_tiled = np.tile(perturbed[:, None, :], (1, cfg.seq, 1))
                     round_norms = _output_norms(session, run_input_name, run_output_name, perturbed_tiled)[:, position]
                     round_best_idx = int(np.argmax(round_norms))
@@ -282,14 +253,9 @@ def compute_max_norm(
             results[tag] = best_norm
             print(f"{tag}: max output norm = {best_norm:.4f}")
             if cfg.input_source.mode == "fixed_norm":
-                # perturbation_spread controls the collision-search ball radius directly,
-                # independent of norm_spread (x's own sampling tightness) and of the (here,
-                # irrelevant) searched best_norm.
-                g_max = _fixed_norm_perturbation_spread(cfg.input_source)
+                g_max = cfg.input_source.perturbation_spread
             else:
                 g_max = best_norm
-            compute_collision_distances(cfg, sublayer_idx, g_max, position, num_y = samples)
-            
+            compute_collision_distances(cfg, sublayer_idx, g_max, position, num_y=samples)
 
     return results
-

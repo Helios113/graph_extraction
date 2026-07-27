@@ -1,7 +1,5 @@
-import argparse
-import sys
 import time
-from pathlib import Path
+
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
@@ -10,12 +8,9 @@ import numpy as np
 import onnxruntime as ort
 import torch
 from tqdm import tqdm
-from scipy.sparse import csc_matrix
-from scipy.sparse.linalg import spilu, gmres
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import ModelConfig, InputSourceConfig, grad_names, load_config
-
+from config import ModelConfig, grad_names
+from optimise_activations import sample_points
 
 def _session_options() -> ort.SessionOptions:
     """Explicit thread counts, since letting ORT pick its own can crash on machines where
@@ -23,6 +18,7 @@ def _session_options() -> ort.SessionOptions:
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
     options.inter_op_num_threads = 1
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
     return options
 
 
@@ -32,6 +28,7 @@ def _save_activations(f: h5py.File, activations: dict[str, np.ndarray]) -> None:
         # Some union-graph outputs (e.g. the ReduceSum'd loss) are 0-d scalars: h5py
         # rejects chunk/filter options (like gzip) on scalar datasets.
         group.create_dataset(name, data=array, compression="gzip" if array.ndim > 0 else None)
+
 
 def save_diagonal_jacobians_svd(cfg: ModelConfig, diagonal_blocks: dict[str, np.ndarray], activations: dict[str, np.ndarray]) -> None:
     """SVD (per leading-dim row -- SEQ position, or (sample, position) if cfg.samples is set)
@@ -63,6 +60,7 @@ def save_diagonal_jacobians_svd(cfg: ModelConfig, diagonal_blocks: dict[str, np.
         _save_activations(f, activations)
     print(f"Saved diagonal-block SVD -> {cfg.svd_path}")
 
+
 def save_diagonal_jacobians(cfg: ModelConfig, diagonal_blocks: dict[str, np.ndarray], activations: dict[str, np.ndarray]) -> None:
     """Save {upstream: (SEQ, D_MODEL, D_MODEL)} (no sampling) or {upstream: (samples,
     num_positions, D_MODEL, D_MODEL)} (cfg.samples set) as one gzip-compressed stacked
@@ -85,6 +83,7 @@ def save_diagonal_jacobians(cfg: ModelConfig, diagonal_blocks: dict[str, np.ndar
         f.attrs["pairs"] = tags
         _save_activations(f, activations)
     print(f"Saved diagonal Jacobians {stacked.shape} -> {cfg.diagonal_jacobians_path}")
+
 
 def _tokenized_samples(cfg: ModelConfig, num_examples: int) -> np.ndarray:
     """num_examples consecutive, non-overlapping `seq`-token windows from
@@ -115,19 +114,22 @@ def _tokenized_sample(cfg: ModelConfig) -> np.ndarray:
     return _tokenized_samples(cfg, 1)
 
 
-def _example_input_np(cfg: ModelConfig) -> np.ndarray:
+def sample_jacobian_points(cfg: ModelConfig, sublayer_idx, position) -> np.ndarray:
     """Single (1, seq[, input_dim]) example used as the shared batch content for
     diagonal-Jacobian computation -- random per input_source.mode='random' (default), or a
     real tokenized window per input_source.mode='dataset'.
     """
+    if cfg.input_source.mode == "fixed_norm":
+        return sample_points(cfg, sublayer_idx=sublayer_idx, position=position, seed=0)
     if cfg.input_source.mode == "dataset":
         return _tokenized_sample(cfg)
     np.random.seed(0)
     if cfg.input_name == "input_ids":
         return np.random.randint(0, cfg.vocab_size, (1, cfg.seq)).astype(np.int64)
     assert cfg.input_dim is not None, f"{cfg.name}: input_dim required in config for non-input_ids models"
-    return np.random.randn(1, cfg.seq, cfg.input_dim).astype(np.float32)
-
+    if cfg.input_name == "random":
+        return np.random.randn(1, cfg.seq, cfg.input_dim).astype(np.float32)
+    raise ValueError
 
 
 def _sample_examples_np(cfg: ModelConfig, rng: np.random.Generator, num_examples: int) -> np.ndarray:
@@ -183,17 +185,15 @@ def sample_diagonal_jacobians(
     }  # {upstream: (samples, num_positions, D_MODEL, D_MODEL)}
     return all_blocks, activations
 
-def get_sign_qr(A):
-    Q, R = np.linalg.qr(A)
-
-    # Q is perfectly conditioned; standard determinant is completely stable
-    sign_Q = np.sign(np.linalg.det(Q))
-
-    # R is triangular; the sign of its determinant is the product of the signs of its diagonal
-    sign_R = np.prod(np.sign(np.diag(R)))
-
-    # det(A) = det(Q) * det(R)
-    return sign_Q * sign_R
+def inv_sqrt_AtA_eig(A):
+    """(AtA)^-1/2 batched over A's leading dims, where A is (..., D_MODEL, D_MODEL) --
+    A.T (transposing only the last two axes, not every axis like the bare `.T` does on an
+    N-d array) and a broadcasted eigvals**-0.5 scaling (not np.diag, which only accepts
+    1D/2D input) so this works on stacked_fp64's full (num_pairs, num_positions, D_MODEL,
+    D_MODEL) shape in one call."""
+    AtA = np.swapaxes(A, -1, -2) @ A
+    eigvals, eigvecs = np.linalg.eigh(AtA)
+    return (eigvecs * eigvals[..., None, :] ** -0.5) @ np.swapaxes(eigvecs, -1, -2)
 
 
 def sample_diagonal_jacobians_slogdet(
@@ -237,20 +237,19 @@ def sample_diagonal_jacobians_slogdet(
             )  # blocks: {upstream: (num_positions, D_MODEL, D_MODEL)}
             stacked = np.stack([blocks[upstream] for upstream, _ in cfg.pairs])  # (num_pairs, num_positions, D_MODEL, D_MODEL)
             stacked_fp64 = stacked.astype(np.float64)
-            ilu = spilu(stacked_fp64, drop_tol=1e-3)
+            
+            
+            M = inv_sqrt_AtA_eig(stacked_fp64)
+            stacked_fp64 = stacked_fp64 @ M
+            
             svals = np.linalg.svd(stacked_fp64, compute_uv=False)  # (num_pairs, num_positions, D_MODEL), descending
             smallest_sv = svals[..., -1]
             largest_sv = svals[..., 0]
+            
             cond = largest_sv / smallest_sv  # (num_pairs, num_positions)
-            _, logabsdet = np.linalg.slogdet(stacked_fp64)
-            # QR-based sign: det(A) = det(Q) * det(R), with Q perfectly conditioned and R
-            # triangular (so det(R) is just the product of its diagonal's signs) -- more
-            # numerically stable than slogdet's own sign for ill-conditioned blocks.
-            Q, R = np.linalg.qr(stacked_fp64)  # batched over (num_pairs, num_positions)
-            sign_Q = np.sign(np.linalg.det(Q))
-            sign_R = np.prod(np.sign(np.diagonal(R, axis1=-2, axis2=-1)), axis=-1)
-            sign = sign_Q * sign_R  # (num_pairs, num_positions)
-
+            sign, logabsdet = np.linalg.slogdet(stacked_fp64)
+          
+          
             # each (num_pairs, num_positions)
             if sign_dset is None:
                 num_positions = sign.shape[1]
@@ -299,31 +298,7 @@ def compute_diagonal_jacobians(
     session: ort.InferenceSession | None = None,
     disable_progress: bool = False,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    """For each pair, the diagonal block(s) (D_MODEL x D_MODEL) of d(downstream)/d(upstream)
-    -- the position-to-itself sensitivity, ignoring cross-position mixing.
-
-    cfg.jacobian_position is None (default): every position's diagonal block is computed,
-    backpropping all seq*d_model outputs. diagonal_blocks is {upstream_name: (SEQ, D_MODEL, D_MODEL)}.
-
-    cfg.jacobian_position is an int: only that position's d_model outputs are backprop'd
-    (seq times fewer backward passes). diagonal_blocks is {upstream_name: (1, D_MODEL, D_MODEL)}.
-
-    example_input_np overrides _example_input_np(cfg)'s (1, seq[, input_dim]) example --
-    e.g. a specific token's embedding instead of the config's default random/dataset input.
-    Same shape contract as _example_input_np: tiled to cfg.batch before feeding the session.
-
-    session overrides the freshly-built ORT InferenceSession -- callers making many calls
-    (e.g. an optimization loop) can build it once and pass it in, skipping the reload of
-    cfg.union_dir's onnx model (and its external-data weights) on every call.
-
-    disable_progress silences the per-call "ORT union graph" tqdm bar -- useful when this
-    is called many times in a loop and the caller prints its own per-call progress instead.
-
-    Returns (diagonal_blocks, activations), where activations is the union graph's own
-    forward-pass outputs (e.g. layernorm/residual-add tensors), keyed by graph output name,
-    each shaped (batch, seq, d_model) -- independent of jacobian_position since they don't
-    depend on the backprop seed mask.
-    """
+    
     positions = range(cfg.seq) if cfg.jacobian_position is None else [cfg.jacobian_position % cfg.seq]
     num_elements = len(positions) * cfg.d_model
     union_model_path = cfg.gradient_path
@@ -358,7 +333,7 @@ def compute_diagonal_jacobians(
     mask_full_np = np.zeros((num_elements, cfg.seq, cfg.d_model), dtype=np.float32)
     for row, position in enumerate(positions):
         mask_full_np[row * cfg.d_model:(row + 1) * cfg.d_model, position, :] = np.eye(cfg.d_model, dtype=np.float32)
-    example_np = example_input_np if example_input_np is not None else _example_input_np(cfg)
+    example_np = example_input_np if example_input_np is not None else sample_points(cfg)
     input_batch_np = np.tile(example_np, (cfg.batch,) + (1,) * (example_np.ndim - 1))
 
     if num_elements % cfg.batch != 0:
@@ -378,7 +353,7 @@ def compute_diagonal_jacobians(
         fetch_names = grad_output_names + (forward_output_names if chunk_idx == 0 else [])
         outputs = session.run(
             fetch_names,
-            {cfg.input_name: input_batch_np, "mask": chunk_mask, "lazy_reset_grad": np.array([True])},
+            {cfg.input_name: input_batch_np, "mask": chunk_mask},
         )
         out = dict(zip(fetch_names, outputs))
         for (upstream, _), out_name in zip(cfg.pairs, grad_output_names):
@@ -397,7 +372,7 @@ def compute_diagonal_jacobians(
         diagonal_blocks[upstream] = np.stack([
             jacobian[row * cfg.d_model:(row + 1) * cfg.d_model, position, :]
             for row, position in enumerate(positions)
-        ]).astype(np.float32) # May need to be removed
+        ]).astype(np.float32)
     return diagonal_blocks, activations
 
 

@@ -8,33 +8,6 @@ ONNX_DIR = Path("onnx_models")
 
 @dataclass
 class InputSourceConfig:
-    """How to obtain the single (1, seq[, input_dim]) example that gets tiled to `batch`
-    and fed through the model. mode = "random" (default): np.random, no other fields
-    needed. mode = "dataset": tokenize real text with an HF tokenizer. mode = "fixed_norm"
-    (collisions pipeline only): ignore any per-sublayer input_mean/input_min/input_max
-    (computed or explicit) and instead sample x with ||x|| tightly concentrated around
-    `norm` -- set `norm` small to probe for hidden collisions under tiny perturbations of a
-    near-zero x, or large to probe a far-from-origin x. Two independent spreads control this
-    mode: `norm_spread` is how tightly x itself is sampled around `norm` (both default to
-    norm/100 if unset); `perturbation_spread` is the collision-search ball radius around each
-    sampled x (instead of the usual hill-climbed max output norm, see max_search.py's
-    compute_max_norm) -- keep it small to search for hidden collisions under a small
-    perturbation regardless of how large or small `norm` itself is.
-
-        [input_source]
-        mode = "dataset"
-        tokenizer = "gpt2"
-        dataset = "wikitext"
-        dataset_config = "wikitext-2-raw-v1"
-        split = "train"
-        text_column = "text"
-
-        [input_source]
-        mode = "fixed_norm"
-        norm = 1e-3
-        norm_spread = 1e-6
-        perturbation_spread = 1e-6
-    """
     mode: str = "random"
     tokenizer: str | None = None
     dataset: str | None = None
@@ -46,7 +19,7 @@ class InputSourceConfig:
     perturbation_spread: float | None = None
 
     def __post_init__(self):
-        if self.mode not in ("random", "dataset", "fixed_norm"):
+        if self.mode not in ("random", "dataset", "fixed_norm", "characteristic"):
             raise ValueError(f"input_source.mode must be 'random', 'dataset', or 'fixed_norm', got {self.mode!r}")
         if self.mode == "dataset" and (self.tokenizer is None or self.dataset is None):
             raise ValueError("input_source.mode = 'dataset' requires 'tokenizer' and 'dataset'")
@@ -168,7 +141,7 @@ class ModelConfig:
     """collision_opt pipeline only: "adam" or "sgd", the update rule applied to y each step."""
     collision_opt_init_perturbation: float = 1e-2
     """collision_opt pipeline only: y0 = x + a random perturbation of this norm (via
-    sample_ball), independent of input_source.mode."""
+    sample_ball_around_x), independent of input_source.mode."""
     collision_opt_position: int = -1
     """collision_opt pipeline only: seq position (Python-style index, like jacobian_position)
     to optimize the collision at; other seq slots are filled with the same sampled x/y as

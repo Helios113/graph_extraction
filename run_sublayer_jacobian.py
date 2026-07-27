@@ -6,13 +6,11 @@ Jacobian -> save.
 Usage: uv run python3 sublayer_jacobians/run_pipeline.py configs/x.toml
 """
 import argparse
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import load_config
-from construct_utils import ensure_base_model, build_single_pair_gradient_graph
-from run_model import compute_sublayer_jacobian, save_sublayer_jacobian
+from utils_compute import compute_sublayer_jacobian
+from utils_post import save_sublayer_jacobian
+from utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs, build_single_pair_gradient_graph
 
 
 def main():
@@ -24,8 +22,10 @@ def main():
     cfg = load_config(args.config)
     assert cfg.pipeline == "sublayer_jacobians", f"{cfg.name}: expected pipeline = \"sublayer_jacobians\", got {cfg.pipeline!r}"
 
+    clear_stale_temp_files(cfg)
     ensure_base_model(cfg, force=args.force)
-
+    ensure_sub_graphs(cfg, force=args.force)
+    
     for sublayer_idx in range(len(cfg.sublayers)):
         sublayer = cfg.sublayers[sublayer_idx]
         print(f"[{sublayer_idx}] {sublayer.input} -> {sublayer.output}")

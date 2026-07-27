@@ -5,14 +5,10 @@ norm + collision-distance plots.
 Usage: uv run python3 collisions/run_pipeline.py configs/qwen_block0_collisions.toml
 """
 import argparse
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import load_config
-from construct_utils import ensure_base_model, clear_stale_temp_files,ensure_sub_graphs
+from utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs
 from optimise_activations import compute_max_norm
-# from activation_stats import ensure_activation_stats
 
 
 def main():

@@ -1,1 +1,3 @@
 ort_build_logs/*
+*.pyc
+*.h5

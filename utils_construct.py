@@ -3,15 +3,11 @@ Usage: uv run python3 convert_model.py configs/gpt2.toml
 """
 
 import contextlib
-import os
-import argparse
 import importlib
+import os
 import shutil
-import sys
 import time
 from pathlib import Path
-from transformers import AutoTokenizer
-
 
 import onnx
 import onnxruntime.training.artifacts as artifacts
@@ -19,11 +15,8 @@ import onnxruntime.training.onnxblock as onnxblock
 import torch
 from onnx import helper
 
-
+from config import ModelConfig, grad_names
 from union_per_pair_artifacts import build_union_artifacts
-
-from config import ModelConfig, grad_names, load_config
-
 
 
 def _dummy_input(cfg: ModelConfig) -> torch.Tensor:
@@ -137,6 +130,47 @@ def _weight_dtype(model: onnx.ModelProto) -> int:
     return model.graph.initializer[0].data_type
 
 
+def _wrap_bfloat16_inputs_with_float32(model: onnx.ModelProto) -> dict[str, str]:
+    """Casts each of `model`'s bf16 graph inputs to float32 at the boundary, in place,
+    leaving every internal tensor (including the model's own outputs) untouched. Returns
+    {original_name: internal_bf16_name} for each input actually rewrapped.
+
+    Severed sub-graphs declare their entry activation (e.g. `add_6`) as bf16 (Qwen2's
+    native dtype), but ORT's Python session.run can't accept bf16 numpy arrays at all --
+    so build_single_pair_gradient_graph's `base_model` needs its input boundary widened to
+    float32 before generate_artifacts ever sees it, the same way optimise_activations.py's
+    _load_io_session widens sub_graph_path for direct sampling. Only inputs are touched here
+    (unlike that sibling helper): the sub-graph's own output (`downstream`) is consumed
+    internally by generate_artifacts's MaskedSumLoss, not fetched by Python, and wrapping it
+    too makes ORT's own gradient-graph builder trip on a bf16/float32 type mismatch at the
+    Cast node generate_artifacts inserts for its loss computation.
+
+    Callers must mark the *returned* internal bf16 name (not the original input name)
+    requires_grad: autodiff differentiating through the boundary Cast itself produces a
+    gradient typed like the Cast's own input (float32) while ORT's gradient-builder still
+    expects the original bf16 elem_type on that edge, which fails graph-load with a Type
+    Error on the `{name}_postcast_Grad/Cast_0` node. Seeding the gradient one edge later, at
+    the genuine bf16 tensor the rest of the forward graph already consumes, avoids
+    differentiating through the synthetic boundary Cast entirely.
+    """
+    graph = model.graph
+    bf16_names: dict[str, str] = {}
+    for inp in list(graph.input):
+        if inp.type.tensor_type.elem_type != onnx.TensorProto.BFLOAT16:
+            continue
+        bf16_name = inp.name + "_bf16"
+        cast_node = helper.make_node(
+            "Cast", inputs=[inp.name], outputs=[bf16_name],
+            to=onnx.TensorProto.BFLOAT16, name=f"{inp.name}_postcast",
+        )
+        graph.node.insert(0, cast_node)
+        for node in graph.node[1:]:
+            node.input[:] = [bf16_name if x == inp.name else x for x in node.input]
+        inp.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
+        bf16_names[inp.name] = bf16_name
+    return bf16_names
+
+
 def _add_layer_norm_stats_outputs(model: onnx.ModelProto) -> onnx.ModelProto:
     # torch.onnx.export only wires up LayerNormalization's Y output. ORT training's
     # LayerNormalizationGrad builder unconditionally reads the Mean/InvStdDev outputs
@@ -199,7 +233,7 @@ def _prepare_severable_model(cfg: ModelConfig):
             helper.make_tensor_value_info("mask", onnx.TensorProto.FLOAT, [cfg.batch, cfg.seq, cfg.d_model])
         )
 
-    return str(_save_severable_model(cfg,model))
+    return str(_save_severable_model(cfg, model))
 
 
 def _save_severable_model(cfg: ModelConfig, model: onnx.ModelProto) -> Path:
@@ -211,10 +245,7 @@ def _save_severable_model(cfg: ModelConfig, model: onnx.ModelProto) -> Path:
     still external-data references, which the checker can only resolve given a path to
     resolve them relative to."""
     severable_model_path = cfg.dir / "severable.onnx"
-    onnx.save(
-        model,
-        str(severable_model_path)
-    )
+    onnx.save(model, str(severable_model_path))
     onnx.checker.check_model(str(severable_model_path))
     return severable_model_path
 
@@ -234,6 +265,7 @@ def _add_layer_value_outputs(model: onnx.ModelProto, layer_names: list[str], cfg
             )
     return model
 
+
 def _set_temp_file_name(block: onnxblock.blocks.Block, temp_dir: Path, temp_file_name: str) -> onnxblock.blocks.Block:
     # Block.__init__ hardcodes "temp.onnx" for every instance, so sibling blocks called
     # back-to-back under the same has_path build collide on temp.onnx.data (onnx.save
@@ -245,6 +277,7 @@ def _set_temp_file_name(block: onnxblock.blocks.Block, temp_dir: Path, temp_file
     block.temp_onnx_file_path = str(temp_dir / temp_file_name)
     block.temp_external_data_file_name = temp_file_name + ".data"
     return block
+
 
 class MaskedSumLoss(onnxblock.blocks.Block):
     """loss = sum(downstream * mask). One per per-pair graph.
@@ -268,11 +301,11 @@ class MaskedSumLoss(onnxblock.blocks.Block):
         self._reduce_sum = _set_temp_file_name(onnxblock.blocks.ReduceSum(keepdims=False), temp_dir, f"temp_reduce_sum_{tag}.onnx")
 
     def build(self, downstream_name):
-        
         downstream_f32 = self._cast(downstream_name)
         masked = self._mul(downstream_f32, "mask")
         return self._reduce_sum(masked)
-    
+
+
 def _add_f32_casts(model: onnx.ModelProto, existing: set[str]) -> None:
     """For every one of `model`'s current graph outputs that isn't float32, appends an
     in-graph Cast to float32 and makes the *cast* tensor a graph output too (in place),
@@ -294,6 +327,46 @@ def _add_f32_casts(model: onnx.ModelProto, existing: set[str]) -> None:
         existing.add(out_name)
 
 
+def _strip_gradient_accumulators(model: onnx.ModelProto) -> None:
+    """Removes onnxblock's InPlaceAccumulatorV2 ("GradientAccumulator*") nodes, in place.
+
+    onnxblock.TrainingBlock.__call__ unconditionally runs build_gradient_accumulation_graph
+    on every training model it builds (no opt-out) -- it swaps each `{param}_grad` graph
+    output for an InPlaceAccumulatorV2 node's own bool "did-it-update" output, wiring the
+    real gradient tensor in as that node's input instead. InPlaceAccumulatorV2 only has a
+    kernel in onnxruntime-training's optimizer runtime, not in a plain inference session, so
+    loading these graphs for a plain forward+backward eval (no optimizer step) needs the
+    accumulator nodes physically gone rather than merely unrequested: onnx.checker and tools
+    that walk every node (as opposed to ORT's own output-driven pruning) still choke on them
+    otherwise, and the dangling `lazy_reset_grad` / `*.accumulation.buffer` inputs linger.
+
+    The gradient tensor each accumulator consumed (its 2nd input) is left as a normal
+    intermediate node output, ready for a caller to declare as a graph output directly.
+    """
+    accumulator_nodes = [n for n in model.graph.node if n.op_type == "InPlaceAccumulatorV2"]
+    if not accumulator_nodes:
+        return
+
+    accumulator_outputs = {o for n in accumulator_nodes for o in n.output}
+    for n in accumulator_nodes:
+        model.graph.node.remove(n)
+
+    kept_outputs = [o for o in model.graph.output if o.name not in accumulator_outputs]
+    del model.graph.output[:]
+    model.graph.output.extend(kept_outputs)
+
+    live_inputs = {i for n in model.graph.node for i in n.input}
+    dead_input_names = {"lazy_reset_grad"} | {
+        i.name for i in model.graph.input if i.name.endswith(".accumulation.buffer")
+    }
+    kept_inputs = [
+        i for i in model.graph.input
+        if i.name not in dead_input_names or i.name in live_inputs
+    ]
+    del model.graph.input[:]
+    model.graph.input.extend(kept_inputs)
+
+
 def _add_grad_outputs(cfg: ModelConfig, union_model_path: Path) -> None:
     """Appends each pair's upstream-gradient as a graph output, in place.
 
@@ -303,6 +376,7 @@ def _add_grad_outputs(cfg: ModelConfig, union_model_path: Path) -> None:
     bf16.
     """
     model = onnx.load(str(union_model_path))
+    _strip_gradient_accumulators(model)
     existing = {o.name for o in model.graph.output}
     weight_dtype = _weight_dtype(model)
 
@@ -328,16 +402,7 @@ def build_per_pair_artifacts(cfg: ModelConfig) -> list[Path]:
     for pair_idx, (upstream, downstream) in enumerate(cfg.pairs):
         tag = f"pair{pair_idx}_{upstream}_{downstream}"
 
-        # onnxblock's internal _TrainingBlock (built inside generate_artifacts, not
-        # something we can pass a temp_dir into) falls back to Block.__init__'s default
-        # temp_onnx_file_path = os.getcwd()/temp.onnx whenever it saves+checks the model
-        # itself (e.g. infer_shapes_on_base). By that point the model's tensors may already
-        # carry external-data locations set relative to cfg.union_artifact_dir (from our own
-        # MaskedSumLoss/_cast/_mul/_reduce_sum blocks, whose temp_onnx_file_path IS patched
-        # via _set_temp_file_name) -- saving/checking from a different cwd then looks for
-        # those filenames in the wrong directory and onnx.checker fails with "is not a
-        # regular file" even though the data is present. chdir into union_artifact_dir so
-        # the unpatched default resolves to the same directory as everything else.
+       
         with chdir(union_dir_abs):
             artifacts.generate_artifacts(
                 severable_model_abs,
@@ -361,9 +426,8 @@ def build_per_pair_artifacts(cfg: ModelConfig) -> list[Path]:
 
         paths.append(training_model_path)
 
-
-
     return paths
+
 
 def sublayer_gradient_path(cfg: ModelConfig, sublayer_idx: int) -> Path:
     sublayer = cfg.sublayers[sublayer_idx]
@@ -391,27 +455,44 @@ def build_single_pair_gradient_graph(cfg: ModelConfig, sublayer_idx: int, force:
         sublayer = cfg.sublayers[sublayer_idx]
         upstream, downstream = sublayer.input, sublayer.output
         tag = f"sublayer{sublayer_idx}_{upstream}_{downstream}"
+        sub_graph_path = cfg.per_pair_dir / f"{tag}_subgraph_eval.onnx"
+
         build_dir = cfg.sublayer_gradients_dir / f"{tag}_build"
+        print("BUILDDIR", build_dir, flush=True)
         if build_dir.exists():
             shutil.rmtree(build_dir)
         build_dir.mkdir(parents=True, exist_ok=True)
-
-        severable_model = _prepare_severable_model(cfg)
-        severable_model_abs = str(Path(severable_model).resolve())
         build_dir_abs = build_dir.resolve()
+        base_scratch_path = build_dir_abs / f"{tag}_base.onnx"
+
+        base_model = onnx.load(str(sub_graph_path))
+        if cfg.needs_layernorm_patch:
+            base_model = _add_layer_norm_stats_outputs(base_model)
+        existing_inputs = {i.name for i in base_model.graph.input}
+        if "mask" not in existing_inputs:
+            # Always float32, regardless of the model's weight dtype: ORT's Python session.run
+            # can't accept bfloat16 numpy inputs, and MaskedSumLoss casts `downstream` to float
+            # before multiplying by `mask` so the dtypes match ONNX's Mul requirement.
+            base_model.graph.input.append(
+                helper.make_tensor_value_info("mask", onnx.TensorProto.FLOAT, [cfg.batch, cfg.seq, cfg.d_model])
+            )
+        onnx.save(base_model, str(base_scratch_path))
+        onnx.checker.check_model(str(base_scratch_path))
 
         with chdir(build_dir_abs):
             artifacts.generate_artifacts(
-                severable_model_abs,
+                str(base_scratch_path),
                 requires_grad=[upstream],
                 loss_input_names=[downstream],
                 prefix=f"{tag}_",
                 loss=MaskedSumLoss(tag, build_dir_abs),
                 artifact_directory=str(build_dir_abs),
             )
+
         training_model_path = build_dir / f"{tag}_training_model.onnx"
         training_model = onnx.load(str(training_model_path))
         training_model = _add_layer_value_outputs(training_model, [upstream, downstream], cfg)
+        _strip_gradient_accumulators(training_model)
 
         existing = {o.name for o in training_model.graph.output}
         weight_dtype = _weight_dtype(training_model)
@@ -422,6 +503,7 @@ def build_single_pair_gradient_graph(cfg: ModelConfig, sublayer_idx: int, force:
                 helper.make_tensor_value_info(grad_name, weight_dtype, [cfg.batch, cfg.seq, cfg.d_model])
             )
             existing.add(grad_name)
+
         _add_f32_casts(training_model, existing)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -433,6 +515,7 @@ def build_single_pair_gradient_graph(cfg: ModelConfig, sublayer_idx: int, force:
         shutil.rmtree(build_dir)
 
     return out_path
+
 
 
 def clear_stale_temp_files(cfg: ModelConfig) -> None:
@@ -451,9 +534,6 @@ def clear_stale_temp_files(cfg: ModelConfig) -> None:
 def extract_sub_graph(cfg: ModelConfig) -> list[Path]:
     cfg.per_pair_dir.mkdir(parents=True, exist_ok=True)
 
-    base_model = onnx.load(str(cfg.base_model_path))
-    base_initializers = {i.name: i for i in base_model.graph.initializer}
-
     paths = []
     for sublayer_idx, sublayer in enumerate(cfg.sublayers):
         tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
@@ -466,6 +546,7 @@ def extract_sub_graph(cfg: ModelConfig) -> list[Path]:
         )
         paths.append(sub_graph_path)
     return paths
+
 
 def ensure_sub_graphs(cfg: ModelConfig, force: bool = False) -> list[Path]:
     """Extracts cfg.per_pair_dir's subgraphs if they don't already all exist (or always, if

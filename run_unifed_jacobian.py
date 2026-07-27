@@ -5,15 +5,11 @@ incrementally to disk, per cfg.svd/cfg.slogdet_only).
 Usage: uv run python3 jacobians/run_pipeline.py configs/qwen_block0_jacobians.toml
 """
 import argparse
-import sys
-from pathlib import Path
 import shutil
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from config import load_config
-from construct_utils import ensure_base_model, build_per_pair_artifacts, build_union_artifacts, exclusive_lock, clear_stale_temp_files, _add_grad_outputs
-
-
-from post_utils import (
+from utils_construct import ensure_base_model, build_per_pair_artifacts, build_union_artifacts, exclusive_lock, clear_stale_temp_files, _add_grad_outputs
+from utils_post import (
     compute_diagonal_jacobians, sample_diagonal_jacobians, sample_diagonal_jacobians_slogdet,
     save_diagonal_jacobians, save_diagonal_jacobians_svd,
 )
@@ -29,9 +25,8 @@ def main():
     assert cfg.pipeline == "jacobians", f"{cfg.name}: expected pipeline = \"jacobians\", got {cfg.pipeline!r}"
 
     clear_stale_temp_files(cfg)
-    
     ensure_base_model(cfg, force=args.force)
-   
+
     lock_path = cfg.gradient_path.with_suffix(cfg.gradient_path.suffix + ".lock")
     with exclusive_lock(lock_path):
         if not args.force and cfg.gradient_path.exists():
@@ -40,15 +35,13 @@ def main():
 
         print("Building per-pair artifacts...")
         per_pair_training_models = build_per_pair_artifacts(cfg)
-            
         build_union_artifacts([str(p) for p in per_pair_training_models], str(cfg.gradient_path))
-            
+
         print("Adding grad outputs (+ float32 casts for bf16 outputs)...")
         _add_grad_outputs(cfg, cfg.gradient_path)
 
         print(f"Removing per-pair artifacts (folded into the union graph) -> {cfg.union_artifact_dir}")
         shutil.rmtree(cfg.union_artifact_dir)
-        
 
     if cfg.slogdet_only:
         sample_diagonal_jacobians_slogdet(cfg)

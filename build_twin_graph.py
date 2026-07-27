@@ -6,7 +6,6 @@ output ("x", a plain input).
 
 Usage: from collision_opt.build_twin_graph import build_twin_training_model
 """
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,9 +14,8 @@ import onnx.compose
 import onnxruntime.training.artifacts as artifacts
 import onnxruntime.training.onnxblock as onnxblock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import ModelConfig, SublayerConfig
-from new_code.construct_utils import _add_layer_norm_stats_outputs, chdir, exclusive_lock
+from utils_construct import _add_layer_norm_stats_outputs, chdir, exclusive_lock
 
 
 class SquaredDiffLoss(onnxblock.blocks.Block):
@@ -65,18 +63,6 @@ class NormalizedSquaredDiffLoss(onnxblock.blocks.Block):
         output_sq_dist = self._reduce_sum_outputs(self._pow_outputs(output_diff))
 
         return self._div(output_sq_dist, input_sq_dist)
-
-
-def _prepare_base_subgraph(cfg: ModelConfig, sublayer: SublayerConfig, sub_graph_path: Path) -> onnx.ModelProto:
-    """Loads the already-extracted sublayer subgraph (see collisions/search_graphs.py's
-    ensure_sub_graphs) and applies the LayerNorm-stats patch if this model needs it --
-    ORT training's gradient-graph building crashes on any LayerNormalization node missing
-    Mean/InvStdDev outputs (see convert_model.py's _add_layer_norm_stats_outputs docstring),
-    same requirement as the jacobians pipeline's severable model."""
-    model = onnx.load(str(sub_graph_path))
-    if cfg.needs_layernorm_patch:
-        model = _add_layer_norm_stats_outputs(model)
-    return model
 
 
 def _build_twin_graph(cfg: ModelConfig, sublayer: SublayerConfig, base_model: onnx.ModelProto) -> onnx.ModelProto:
@@ -220,20 +206,15 @@ def build_twin_training_model(cfg: ModelConfig, sublayer_idx: int, force: bool =
         tag = _tag(cfg, sublayer_idx)
         sub_graph_path = cfg.per_pair_dir / f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}_subgraph_eval.onnx"
 
-        # base_model = _prepare_base_subgraph(cfg, sublayer, sub_graph_path)
-      
-      
-        base_model = model = onnx.load(str(sub_graph_path))
-      
+        base_model = onnx.load(str(sub_graph_path))
+        if cfg.needs_layernorm_patch:
+            base_model = _add_layer_norm_stats_outputs(base_model)
         base_scratch_path = artifact_dir / f"sublayer{sublayer_idx}_base.onnx"
-        
         onnx.save(base_model, str(base_scratch_path))
         onnx.checker.check_model(str(base_scratch_path))
 
         twin_model = _build_twin_graph(cfg, sublayer, onnx.load(str(base_scratch_path)))
-        
-        
-        
+
         shape = [cfg.batch, cfg.seq, cfg.d_model]
         _rewrite_bf16_input_as_float(twin_model.graph, sublayer.input, shape)
         _make_y_a_trainable_initializer(twin_model.graph, y_input_name(sublayer), shape)
@@ -263,16 +244,16 @@ def build_twin_training_model(cfg: ModelConfig, sublayer_idx: int, force: bool =
                 artifact_directory=str(artifact_dir_abs),
             )
 
-        # # This ORT build's onnx-package IR version (13) exceeds the training runtime's max
-        # # supported IR version (10) -- generate_artifacts saves the optimizer model at the
-        # # installed onnx package's default IR version, but (for reasons not fully understood)
-        # # only the optimizer model actually lands on 13 while the training/eval models land
-        # # on 10, so only the optimizer model needs downgrading before training.api.Optimizer
-        # # can load it.
+        # This ORT build's onnx-package IR version (13) exceeds the training runtime's max
+        # supported IR version (10) -- generate_artifacts saves the optimizer model at the
+        # installed onnx package's default IR version, but (for reasons not fully understood)
+        # only the optimizer model actually lands on 13 while the training/eval models land
+        # on 10, so only the optimizer model needs downgrading before training.api.Optimizer
+        # can load it.
         opt_path = optimizer_model_path(cfg, sublayer_idx)
         opt_model = onnx.load(str(opt_path))
         opt_model.ir_version = 10
         onnx.save(opt_model, str(opt_path))
 
-        # print(f"Saved twin training artifacts -> {artifact_dir}")
+        print(f"Saved twin training artifacts -> {artifact_dir}")
         return out_path
