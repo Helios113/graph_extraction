@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import load_config
 from construct_utils import ensure_base_model, build_single_pair_gradient_graph
-from sublayer_jacobians.run_model import compute_sublayer_jacobian, save_sublayer_jacobian
+from run_model import compute_sublayer_jacobian, save_sublayer_jacobian
 
 
 def main():

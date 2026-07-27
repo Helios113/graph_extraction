@@ -7,7 +7,6 @@ Usage: from collision_opt.optimize import run_collision_opt
 import sys
 from pathlib import Path
 
-import h5py
 import numpy as np
 import onnxruntime as ort
 from onnxruntime.training.api import CheckpointState, Module, Optimizer
@@ -19,6 +18,7 @@ from optimise_activations import sample_x, sample_ball
 from build_twin_graph import (
     checkpoint_path, eval_model_path, optimizer_model_path, training_model_path, y_input_name,
 )
+from post_utils import save_collision_opt_results
 
 
 def optimize_collision(cfg: ModelConfig, sublayer_idx: int, seed: int = 0) -> dict[str, np.ndarray]:
@@ -70,18 +70,6 @@ def optimize_collision(cfg: ModelConfig, sublayer_idx: int, seed: int = 0) -> di
         "domain_distance_final": domain_distance_final,
     }
 
-
-def save_collision_opt_results(cfg: ModelConfig, all_results: dict[int, dict[str, np.ndarray]]) -> None:
-    cfg.collision_opt_results_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(cfg.collision_opt_results_path, "w") as f:
-        for sublayer_idx, results in all_results.items():
-            sublayer = cfg.sublayers[sublayer_idx]
-            tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
-            group = f.create_group(tag)
-            for name, array in results.items():
-                group.create_dataset(name, data=array, compression="gzip")
-            group.attrs["tag"] = tag
-    print(f"Saved collision_opt results -> {cfg.collision_opt_results_path}")
 
 
 def run_collision_opt(cfg: ModelConfig) -> None:

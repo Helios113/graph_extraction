@@ -401,3 +401,36 @@ def compute_diagonal_jacobians(
     return diagonal_blocks, activations
 
 
+def save_sublayer_jacobian(
+    cfg: ModelConfig, sublayer_idx: int, diagonal_block: np.ndarray, activations: dict[str, np.ndarray],
+) -> None:
+    """Saves one sublayer's diagonal Jacobian block(s) (SEQ, D_MODEL, D_MODEL) plus its
+    sign/log|det| (np.linalg.slogdet, batched over the SEQ axis) and forward-pass
+    `activations`, to cfg.sublayer_jacobians_dir/sublayer{idx}_{input}_{output}.h5.
+    """
+    sublayer = cfg.sublayers[sublayer_idx]
+    tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
+    sign, logabsdet = np.linalg.slogdet(diagonal_block)
+
+    out_path = cfg.sublayer_jacobians_dir / f"{tag}.h5"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(out_path, "w") as f:
+        f.create_dataset("diagonal_block", data=diagonal_block, compression="gzip")
+        f.create_dataset("sign", data=sign, compression="gzip")
+        f.create_dataset("logabsdet", data=logabsdet, compression="gzip")
+        f.attrs["pair"] = f"{sublayer.input}_{sublayer.output}"
+        _save_activations(f, activations)
+    print(f"Saved sublayer Jacobian {diagonal_block.shape} -> {out_path}")
+
+
+def save_collision_opt_results(cfg: ModelConfig, all_results: dict[int, dict[str, np.ndarray]]) -> None:
+    cfg.collision_opt_results_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(cfg.collision_opt_results_path, "w") as f:
+        for sublayer_idx, results in all_results.items():
+            sublayer = cfg.sublayers[sublayer_idx]
+            tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
+            group = f.create_group(tag)
+            for name, array in results.items():
+                group.create_dataset(name, data=array, compression="gzip")
+            group.attrs["tag"] = tag
+    print(f"Saved collision_opt results -> {cfg.collision_opt_results_path}")

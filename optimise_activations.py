@@ -150,7 +150,6 @@ def sample_ball(x: np.ndarray, r: float, n_samples: int, seed=None) -> np.ndarra
     return x + directions * radii[:, None] 
 
 
-
 def compute_collision_distances(
     cfg: ModelConfig,
     sublayer_idx: int,
@@ -193,32 +192,9 @@ def compute_collision_distances(
     for start in tqdm(range(0, num_y, cfg.batch), desc=f"{tag} collision search"):
        y = sample_ball(x, g_max, cfg.batch)
        f_y = y + g(y)
-    #    print(f_y.shape)
-    #    print(f_x.shape)
-    #    print(f_x[:,None].shape)
-    #    print((f_y-f_x[:,None]).shape, flush=True)
-       
        distances_image[start:start+cfg.batch] = np.linalg.norm(f_y-f_x, axis=-1).reshape(-1)
        distances_domain[start:start+cfg.batch] = np.linalg.norm(y-x, axis=-1).reshape(-1)
 
-
-    # distances_image = np.empty((cfg.batch, num_y), dtype=np.float32)
-    # distances_domain = np.empty((cfg.batch, num_y), dtype=np.float32)
-
-    # for start in tqdm(range(0, num_y, cfg.batch), desc=f"{tag} collision search"):
-    #     end = min(start + cfg.batch, num_y)
-    #     current_batch = end - start
-        
-    #     # y shape: (N, current_batch, d)
-    #     y = sample_ball(x, g_max, current_batch)
-    #     f_y = y + g(y)
-        
-    #     # f_x[:, None] and x[:, None] broadcast to (N, 1, d)
-    #     # The norm across axis=-1 results in shape (N, current_batch)
-    #     distances_image[:, start:end] = np.linalg.norm(f_y - f_x[:, None, :], axis=-1)
-    #     distances_domain[:, start:end] = np.linalg.norm(y - x[:, None, :], axis=-1)
-    
-    
     float32_eps = np.finfo(np.float32).eps
     n_near_zero = int(np.count_nonzero(distances_image <= float32_eps))
 
@@ -233,8 +209,6 @@ def compute_collision_distances(
         f.attrs["float32_eps"] = float32_eps
         f.attrs["n_near_zero"] = n_near_zero
     print(f"{tag}: saved collision distances to {data_path}")
-
-
 
 
 def compute_max_norm(

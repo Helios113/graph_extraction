@@ -9,8 +9,8 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import ModelConfig, load_config
-from new_code.construct_utils import sublayer_gradient_path, build_single_pair_gradient_graph, ensure_base_model
-from new_code.post_utils import (
+from utils_construct import sublayer_gradient_path, build_single_pair_gradient_graph, ensure_base_model
+from post_utils import (
     _session_options, _example_input_np, _save_activations,
 )
 
@@ -89,42 +89,3 @@ def compute_sublayer_jacobian(
     return diagonal_block, activations
 
 
-def save_sublayer_jacobian(
-    cfg: ModelConfig, sublayer_idx: int, diagonal_block: np.ndarray, activations: dict[str, np.ndarray],
-) -> None:
-    """Saves one sublayer's diagonal Jacobian block(s) (SEQ, D_MODEL, D_MODEL) plus its
-    sign/log|det| (np.linalg.slogdet, batched over the SEQ axis) and forward-pass
-    `activations`, to cfg.sublayer_jacobians_dir/sublayer{idx}_{input}_{output}.h5.
-    """
-    sublayer = cfg.sublayers[sublayer_idx]
-    tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
-    sign, logabsdet = np.linalg.slogdet(diagonal_block)
-
-    out_path = cfg.sublayer_jacobians_dir / f"{tag}.h5"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(out_path, "w") as f:
-        f.create_dataset("diagonal_block", data=diagonal_block, compression="gzip")
-        f.create_dataset("sign", data=sign, compression="gzip")
-        f.create_dataset("logabsdet", data=logabsdet, compression="gzip")
-        f.attrs["pair"] = f"{sublayer.input}_{sublayer.output}"
-        _save_activations(f, activations)
-    print(f"Saved sublayer Jacobian {diagonal_block.shape} -> {out_path}")
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config", help="path to a TOML config, e.g. configs/qwen_block0_sublayer_jacobians.toml")
-    parser.add_argument("sublayer_idx", type=int, help="index into the config's [[sublayers]] list")
-    args = parser.parse_args()
-    cfg = load_config(args.config)
-
-    ensure_base_model(cfg)
-    build_single_pair_gradient_graph(cfg, args.sublayer_idx)
-
-    print(f"Computing sublayer {args.sublayer_idx} diagonal-block Jacobian...")
-    diagonal_block, activations = compute_sublayer_jacobian(cfg, args.sublayer_idx)
-    save_sublayer_jacobian(cfg, args.sublayer_idx, diagonal_block, activations)
-
-
-if __name__ == "__main__":
-    main()
