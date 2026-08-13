@@ -1,9 +1,15 @@
+
+import enum
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
 ONNX_DIR = Path("onnx_models")
 
+from enum import Enum
+class LossType(Enum):
+    MaskedSumLoss = 1
+    SquaredDiffLoss = 2
+    NormalizedSquaredDiffLoss = 3
 
 
 @dataclass
@@ -29,39 +35,10 @@ class InputSourceConfig:
 
 @dataclass
 class SublayerConfig:
-    """One block of interest to extract: `input` is the upstream residual-stream tensor,
-    `output` is the raw sublayer output (attn or ffn, post-norm, pre-residual-add) computed
-    from it
-
-    input_mean/input_min/input_max may be a single float (one baseline shared by every seq
-    position -- the historical/seq=1 shape) or a list with one entry per seq position
-    (0..cfg.seq-1), e.g. from generate_embedding_stats.py's per-position output. Use
-    SublayerConfig.mean_at(position) etc. rather than reading the field directly, so callers
-    don't need to handle both shapes themselves. None (the default) means "not set" -- the
-    collisions pipeline auto-populates these by computing activation stats itself; see
-    collisions/run_pipeline.py's ensure_activation_stats."""
-    input: str
-    output: str
-    input_mean: float | list[float] | None = None
-    input_min: float | list[float] | None = None
-    input_max: float | list[float] | None = None
-
-    @property
-    def has_stats(self) -> bool:
-        return self.input_mean is not None and self.input_min is not None and self.input_max is not None
-
-    def _at(self, field: float | list[float] | None, position: int) -> float:
-        assert field is not None, "stats not set -- see has_stats"
-        return field[position] if isinstance(field, list) else field
-
-    def mean_at(self, position: int) -> float:
-        return self._at(self.input_mean, position)
-
-    def min_at(self, position: int) -> float:
-        return self._at(self.input_min, position)
-
-    def max_at(self, position: int) -> float:
-        return self._at(self.input_max, position)
+    loss_type: LossType
+    input_shape: list[int]
+    output: list[str]
+    input: list[str]
 
 
 PIPELINES = ("jacobians", "activations", "collisions", "collision_opt", "sublayer_jacobians")
@@ -185,53 +162,57 @@ class ModelConfig:
         return self.dir / "base_model.onnx"
 
     @property
-    def per_pair_dir(self) -> Path:
-        return self.dir / "per_pair_artifacts"
+    def sub_block_path(self) -> Path:
+        return self.dir / "sub_blocks"
 
     @property
-    def union_artifact_dir(self) -> Path:
-        return self.dir / "union_artifacts"
+    def sub_block_jacobian_path(self) -> Path:
+        return self.dir / "sub_block_jacobians"
 
-    @property
-    def gradient_path(self) -> Path:
-        return self.dir / "gradient.onnx"
+    # @property
+    # def union_artifact_dir(self) -> Path:
+    #     return self.dir / "union_artifacts"
 
-    @property
-    def embeddings_path(self) -> Path:
-        return self.dir / "embeddings.onnx"
+    # @property
+    # def gradient_path(self) -> Path:
+    #     return self.dir / "gradient.onnx"
 
-    @property
-    def diagonal_jacobians_path(self) -> Path:
-        return self.h5_dir / "diagonal_blocks.h5"
+    # @property
+    # def embeddings_path(self) -> Path:
+    #     return self.dir / "embeddings.onnx"
 
-    @property
-    def sublayer_gradients_dir(self) -> Path:
-        """sublayer_jacobians pipeline only: one independent per-pair training graph per
-        sublayer (never unioned), keyed by f"sublayer{i}_{input}_{output}_gradient.onnx"."""
-        return self.dir / "sublayer_jacobians"
+    # @property
+    # def diagonal_jacobians_path(self) -> Path:
+    #     return self.h5_dir / "diagonal_blocks.h5"
 
-    @property
-    def sublayer_jacobians_dir(self) -> Path:
-        """sublayer_jacobians pipeline only: each pair's own diagonal-block h5 result,
-        keyed by f"sublayer{i}_{input}_{output}.h5" -- under save_dir if set, like
-        diagonal_jacobians_path."""
-        return self.h5_dir / "sublayer_jacobians"
+    # @property
+    # def sublayer_gradients_dir(self) -> Path:
+    #     """sublayer_jacobians pipeline only: one independent per-pair training graph per
+    #     sublayer (never unioned), keyed by f"sublayer{i}_{input}_{output}_gradient.onnx"."""
+    #     return self.dir / "sublayer_jacobians"
 
-    @property
-    def svd_path(self) -> Path:
-        return self.h5_dir / "svd_diagonal_blocks.h5"
+    # @property
+    # def sublayer_jacobians_dir(self) -> Path:
+    #     """sublayer_jacobians pipeline only: each pair's own diagonal-block h5 result,
+    #     keyed by f"sublayer{i}_{input}_{output}.h5" -- under save_dir if set, like
+    #     diagonal_jacobians_path."""
+    #     return self.h5_dir / "sublayer_jacobians"
 
-    @property
-    def collision_distances_dir(self) -> Path:
-        return self.h5_dir / "collision_distances"
+    # @property
+    # def svd_path(self) -> Path:
+    #     return self.h5_dir / "svd_diagonal_blocks.h5"
 
-    @property
-    def collision_opt_graph_dir(self) -> Path:
-        return self.dir / "collision_opt_artifacts"
+    # @property
+    # def collision_distances_dir(self) -> Path:
+    #     return self.h5_dir / "collision_distances"
 
-    @property
-    def collision_opt_results_path(self) -> Path:
-        return self.h5_dir / "collision_opt_results.h5"
+    # @property
+    # def collision_opt_graph_dir(self) -> Path:
+    #     return self.dir / "collision_opt_artifacts"
+
+    # @property
+    # def collision_opt_results_path(self) -> Path:
+    #     return self.h5_dir / "collision_opt_results.h5"
 
 
 def grad_names(cfg: ModelConfig) -> list[str]:

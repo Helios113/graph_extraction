@@ -18,52 +18,6 @@ from config import ModelConfig, SublayerConfig
 from utils_construct import _add_layer_norm_stats_outputs, chdir, exclusive_lock
 
 
-class SquaredDiffLoss(onnxblock.blocks.Block):
-    """loss = sum((f(x) - f(y))**2). Unlike MaskedSumLoss, no `mask` input -- every element of
-    both copies' outputs contributes to the loss directly."""
-
-    def __init__(self):
-        super().__init__()
-        self._cast_a = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._cast_b = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._sub = onnxblock.blocks.Sub()
-        self._pow = onnxblock.blocks.Pow(2.0)
-        self._reduce_sum = onnxblock.blocks.ReduceSum(keepdims=False)
-
-    def build(self, a_name, b_name):
-        diff = self._sub(self._cast_a(a_name), self._cast_b(b_name))
-        return self._reduce_sum(self._pow(diff))
-
-
-class NormalizedSquaredDiffLoss(onnxblock.blocks.Block):
-    """loss = sum((f(x) - f(y))**2) / sum((x - y)**2) -- output squared-distance normalized
-    by input squared-distance, so shrinking ||x - y|| doesn't trivially shrink the loss on
-    its own; the optimizer is rewarded only for closing the output gap faster than the input
-    gap grows."""
-
-    def __init__(self):
-        super().__init__()
-        self._cast_x = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._cast_y = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._cast_a = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._cast_b = onnxblock.blocks.Cast(onnx.TensorProto.FLOAT)
-        self._sub_inputs = onnxblock.blocks.Sub()
-        self._sub_outputs = onnxblock.blocks.Sub()
-        self._pow_inputs = onnxblock.blocks.Pow(2.0)
-        self._pow_outputs = onnxblock.blocks.Pow(2.0)
-        self._reduce_sum_inputs = onnxblock.blocks.ReduceSum(keepdims=False)
-        self._reduce_sum_outputs = onnxblock.blocks.ReduceSum(keepdims=False)
-        self._div = onnxblock.blocks.Div()
-
-    def build(self, x_name, y_name, a_name, b_name):
-        input_diff = self._sub_inputs(self._cast_x(x_name), self._cast_y(y_name))
-        input_sq_dist = self._reduce_sum_inputs(self._pow_inputs(input_diff))
-
-        output_diff = self._sub_outputs(self._cast_a(a_name), self._cast_b(b_name))
-        output_sq_dist = self._reduce_sum_outputs(self._pow_outputs(output_diff))
-
-        return self._div(output_sq_dist, input_sq_dist)
-
 
 def _build_twin_graph(cfg: ModelConfig, sublayer: SublayerConfig, base_model: onnx.ModelProto) -> onnx.ModelProto:
     """Concatenates a copy of base_model (unprefixed, feeding `sublayer.input`) with a
@@ -210,7 +164,7 @@ def build_twin_training_model(cfg: ModelConfig, sublayer_idx: int, force: bool =
         if cfg.needs_layernorm_patch:
             base_model = _add_layer_norm_stats_outputs(base_model)
         base_scratch_path = artifact_dir / f"sublayer{sublayer_idx}_base.onnx"
-        onnx.save(base_model, str(base_scratch_path))
+        onnx.save(base_model, str(base_scratch_path), format="onnxtxt")
         onnx.checker.check_model(str(base_scratch_path))
 
         twin_model = _build_twin_graph(cfg, sublayer, onnx.load(str(base_scratch_path)))
@@ -219,7 +173,7 @@ def build_twin_training_model(cfg: ModelConfig, sublayer_idx: int, force: bool =
         _rewrite_bf16_input_as_float(twin_model.graph, sublayer.input, shape)
         _make_y_a_trainable_initializer(twin_model.graph, y_input_name(sublayer), shape)
         twin_path = (artifact_dir / f"sublayer{sublayer_idx}_twin.onnx").resolve()
-        onnx.save(twin_model, str(twin_path))
+        onnx.save(twin_model, str(twin_path), format="onnxtxt")
         onnx.checker.check_model(str(twin_path))
 
         if cfg.collision_opt_loss == "normalized":
@@ -253,7 +207,7 @@ def build_twin_training_model(cfg: ModelConfig, sublayer_idx: int, force: bool =
         opt_path = optimizer_model_path(cfg, sublayer_idx)
         opt_model = onnx.load(str(opt_path))
         opt_model.ir_version = 10
-        onnx.save(opt_model, str(opt_path))
+        onnx.save(opt_model, str(opt_path), format="onnxtxt")
 
         print(f"Saved twin training artifacts -> {artifact_dir}")
         return out_path

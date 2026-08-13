@@ -13,16 +13,23 @@ import onnx
 import onnxruntime.training.artifacts as artifacts
 import onnxruntime.training.onnxblock as onnxblock
 import torch
+from matplotlib.pylab import full
 from onnx import helper
+from onnx.utils import Extractor
+from PIL.ImImagePlugin import i
+from transformers.models.auto import AutoModelForCausalLM
 
-from config import ModelConfig, grad_names
+from config import LossType, ModelConfig, SublayerConfig, grad_names
+from loss import MaskedSumLoss, NormalizedSquaredDiffLoss, SquaredDiffLoss
 from union_per_pair_artifacts import build_union_artifacts
 
 
 def _dummy_input(cfg: ModelConfig) -> torch.Tensor:
     if cfg.input_name == "input_ids":
         return torch.randint(0, cfg.vocab_size, (cfg.batch, cfg.seq))
-    assert cfg.input_dim is not None, f"{cfg.name}: input_dim required in config for non-input_ids models"
+    assert cfg.input_dim is not None, (
+        f"{cfg.name}: input_dim required in config for non-input_ids models"
+    )
     return torch.randn(cfg.batch, cfg.seq, cfg.input_dim)
 
 
@@ -32,22 +39,14 @@ def _needs_embeds_kwarg(cfg: ModelConfig) -> bool:
     silently lands in e.g. `past_key_values` instead."""
     return cfg.input_name == "inputs_embeds" and ":" not in cfg.model
 
+
 def _load_model(spec: str) -> torch.nn.Module:
-    """`spec` is either an HF model id (passed to AutoModel.from_pretrained) or a
-    "module:factory_fn" dotted path to a zero-arg local factory returning an eval() module.
-    """
-    if ":" in spec:
-        module_name, factory_name = spec.split(":", 1)
-        module = importlib.import_module(module_name)
-        model = getattr(module, factory_name)()
-    else:
-        from transformers import AutoModelForCausalLM
 
-        model = AutoModelForCausalLM.from_pretrained(spec)
-        model.eval()
-        model.config.use_cache = False
-
+    model = AutoModelForCausalLM.from_pretrained(spec)
+    model.eval()
+    model.config.use_cache = False
     return model
+
 
 def _random_init(model: torch.nn.Module, seed: int) -> None:
     """Reinitialize every parameter in-place with fresh random weights (matching each
@@ -57,22 +56,9 @@ def _random_init(model: torch.nn.Module, seed: int) -> None:
     generator = torch.Generator().manual_seed(seed)
     with torch.no_grad():
         for param in model.parameters():
-            param.copy_(torch.randn(param.shape, generator=generator, dtype=param.dtype))
-
-def export_base_model(cfg: ModelConfig) -> None:
-    cfg.dir.mkdir(parents=True, exist_ok=True)
-    model = _load_model(cfg.model)
-    if cfg.random_init:
-        _random_init(model, cfg.random_init_seed)
-    dummy_input = _dummy_input(cfg)
-    if _needs_embeds_kwarg(cfg):
-        args = ({"inputs_embeds": dummy_input},)
-    else:
-        args = (dummy_input,)
-    torch.onnx.export(
-        model, args, str(cfg.base_model_path), input_names=[cfg.input_name], output_names=["output"]
-    )
-    print(f"Saved base model -> {cfg.base_model_path}")
+            param.copy_(
+                torch.randn(param.shape, generator=generator, dtype=param.dtype),
+            )
 
 
 @contextlib.contextmanager
@@ -107,90 +93,26 @@ def chdir(path: Path):
         os.chdir(prev)
 
 
-def ensure_base_model(cfg: ModelConfig, force: bool = False) -> None:
-    """Exports cfg.base_model_path if it doesn't already exist (or always, if force), guarded
-    by a lockfile so two processes sharing the same `name` (and therefore the same
-    base_model_path -- e.g. several configs submitted as separate cluster jobs in parallel)
-    never export/read the same file concurrently: onnx.load has no partial-write protection,
-    so a reader can otherwise see another writer's half-written base_model.onnx.data.
-    Whichever process gets the lock first exports; every other process waits, then finds the
-    file already there (unless force) and skips its own export."""
-    lock_path = cfg.base_model_path.with_suffix(cfg.base_model_path.suffix + ".lock")
-    with exclusive_lock(lock_path):
-        if not force and cfg.base_model_path.exists():
-            print(f"Base model already exists, skipping export -> {cfg.base_model_path}")
-        else:
-            print(f"Exporting base model ({cfg.model})...")
-            export_base_model(cfg)
-
-
-def _weight_dtype(model: onnx.ModelProto) -> int:
-    """The TensorProto dtype of the model's weights, so patched-in inputs/outputs
-    (mask, LayerNorm stats, layer values) match it instead of assuming fp32."""
-    return model.graph.initializer[0].data_type
-
-
-def _wrap_bfloat16_inputs_with_float32(model: onnx.ModelProto) -> dict[str, str]:
-    """Casts each of `model`'s bf16 graph inputs to float32 at the boundary, in place,
-    leaving every internal tensor (including the model's own outputs) untouched. Returns
-    {original_name: internal_bf16_name} for each input actually rewrapped.
-
-    Severed sub-graphs declare their entry activation (e.g. `add_6`) as bf16 (Qwen2's
-    native dtype), but ORT's Python session.run can't accept bf16 numpy arrays at all --
-    so build_single_pair_gradient_graph's `base_model` needs its input boundary widened to
-    float32 before generate_artifacts ever sees it, the same way optimise_activations.py's
-    _load_io_session widens sub_graph_path for direct sampling. Only inputs are touched here
-    (unlike that sibling helper): the sub-graph's own output (`downstream`) is consumed
-    internally by generate_artifacts's MaskedSumLoss, not fetched by Python, and wrapping it
-    too makes ORT's own gradient-graph builder trip on a bf16/float32 type mismatch at the
-    Cast node generate_artifacts inserts for its loss computation.
-
-    Callers must mark the *returned* internal bf16 name (not the original input name)
-    requires_grad: autodiff differentiating through the boundary Cast itself produces a
-    gradient typed like the Cast's own input (float32) while ORT's gradient-builder still
-    expects the original bf16 elem_type on that edge, which fails graph-load with a Type
-    Error on the `{name}_postcast_Grad/Cast_0` node. Seeding the gradient one edge later, at
-    the genuine bf16 tensor the rest of the forward graph already consumes, avoids
-    differentiating through the synthetic boundary Cast entirely.
-    """
-    graph = model.graph
-    bf16_names: dict[str, str] = {}
-    for inp in list(graph.input):
-        if inp.type.tensor_type.elem_type != onnx.TensorProto.BFLOAT16:
-            continue
-        bf16_name = inp.name + "_bf16"
-        cast_node = helper.make_node(
-            "Cast", inputs=[inp.name], outputs=[bf16_name],
-            to=onnx.TensorProto.BFLOAT16, name=f"{inp.name}_postcast",
-        )
-        graph.node.insert(0, cast_node)
-        for node in graph.node[1:]:
-            node.input[:] = [bf16_name if x == inp.name else x for x in node.input]
-        inp.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
-        bf16_names[inp.name] = bf16_name
-    return bf16_names
-
-
-def _add_layer_norm_stats_outputs(model: onnx.ModelProto) -> onnx.ModelProto:
-    # torch.onnx.export only wires up LayerNormalization's Y output. ORT training's
-    # LayerNormalizationGrad builder unconditionally reads the Mean/InvStdDev outputs
-    # (O(1)/O(2) in gradient_builder_base.h) with no guard, so any LayerNormalization
-    # node without them crashes gradient graph building with:
-    #   RuntimeError: ... i < node_->OutputDefs().size() was false.
-    # https://github.com/microsoft/onnxruntime/issues/22955
+def _add_layer_norm_stats_outputs(
+    model: onnx.ModelProto,
+) -> onnx.ModelProto:
     model = onnx.shape_inference.infer_shapes(model)
     shapes = {
         vi.name: vi
-        for vi in list(model.graph.value_info) + list(model.graph.input) + list(model.graph.output)
+        for vi in list(model.graph.value_info)
+        + list(model.graph.input)
+        + list(model.graph.output)
     }
-    dtype = _weight_dtype(model)
+    # dtype = _weight_dtype(model)
 
     for node in model.graph.node:
         if node.op_type != "LayerNormalization" or len(node.output) > 1:
             continue
         x_vi = shapes.get(node.input[0])
         if x_vi is None or not x_vi.type.tensor_type.HasField("shape"):
-            raise RuntimeError(f"No static shape for {node.input[0]!r} feeding {node.name}")
+            raise RuntimeError(
+                f"No static shape for {node.input[0]!r} feeding {node.name}",
+            )
         x_shape = [d.dim_value for d in x_vi.type.tensor_type.shape.dim]
         axis = next((a.i for a in node.attribute if a.name == "axis"), -1)
         if axis < 0:
@@ -201,56 +123,17 @@ def _add_layer_norm_stats_outputs(model: onnx.ModelProto) -> onnx.ModelProto:
         node.output.extend([mean_name, invstd_name])
         for out_name in (mean_name, invstd_name):
             model.graph.value_info.append(
-                helper.make_tensor_value_info(out_name, dtype, stats_shape)
+                helper.make_tensor_value_info(out_name, dtype, stats_shape),
             )
 
-    # Not checked here: model's initializers are still external-data references (this
-    # function runs on a load_external_data=False proto), and onnx.checker.check_model
-    # can't resolve those against a bare in-memory proto -- it needs a path to resolve
-    # relative to, same as _save_severable_model's own check_model(..., True) call. The
-    # caller checks the saved file's path once it's on disk in the right directory instead.
     return model
 
-def _prepare_severable_model(cfg: ModelConfig):
-    """Patches the base model (LayerNorm stats outputs, `mask` input) and saves it to disk
-    with external data, returning its path. generate_artifacts must be given a path rather
-    than an in-memory ModelProto for models whose initializers exceed protobuf's 2GB message
-    limit -- passing a ModelProto forces onnxblock to fully serialize the model in memory
-    (SerializeToString), which silently overflows past 2GB instead of raising. A path is
-    also required for onnxblock's internal check_model(..., True) calls to resolve the
-    external-data location relative to the model's own directory instead of the process's
-    cwd (the in-memory-proto code path has no directory to resolve against at all).
-    """
-    model = onnx.load(str(cfg.base_model_path), load_external_data = False)
-    if cfg.needs_layernorm_patch:
-        model = _add_layer_norm_stats_outputs(model)
-    existing_inputs = {i.name for i in model.graph.input}
-    if "mask" not in existing_inputs:
-        # Always float32, regardless of the model's weight dtype: ORT's Python session.run
-        # can't accept bfloat16 numpy inputs, and MaskedSumLoss casts `downstream` to float
-        # before multiplying by `mask` so the dtypes match ONNX's Mul requirement.
-        model.graph.input.append(
-            helper.make_tensor_value_info("mask", onnx.TensorProto.FLOAT, [cfg.batch, cfg.seq, cfg.d_model])
-        )
 
-    return str(_save_severable_model(cfg, model))
-
-
-def _save_severable_model(cfg: ModelConfig, model: onnx.ModelProto) -> Path:
-    """Saves the patched model to its own file (never cfg.base_model_path), alongside
-    cfg.base_model_path in cfg.dir, so onnxblock's check_model(..., True) can resolve the
-    external-data location relative to that directory (where the base model's .onnx.data
-    already lives) instead of the process's cwd. Also runs onnx.checker.check_model on the
-    saved path (not the in-memory proto) for the same reason -- the proto's initializers are
-    still external-data references, which the checker can only resolve given a path to
-    resolve them relative to."""
-    severable_model_path = cfg.dir / "severable.onnx"
-    onnx.save(model, str(severable_model_path))
-    onnx.checker.check_model(str(severable_model_path))
-    return severable_model_path
-
-
-def _add_layer_value_outputs(model: onnx.ModelProto, layer_names: list[str], cfg: ModelConfig) -> onnx.ModelProto:
+def _add_layer_value_outputs(
+    model: onnx.ModelProto,
+    layer_names: list[str],
+    cfg: ModelConfig,
+) -> onnx.ModelProto:
     """Expose each severed layer's own activations as a graph output (not just its
     gradient), so callers can read e.g. `add_1` alongside `add_1_grad`. generate_artifacts
     keeps the full forward pass regardless of which slice has requires_grad, so every layer
@@ -261,308 +144,244 @@ def _add_layer_value_outputs(model: onnx.ModelProto, layer_names: list[str], cfg
     for name in layer_names:
         if name not in existing:
             model.graph.output.append(
-                helper.make_tensor_value_info(name, dtype, [cfg.batch, cfg.seq, cfg.d_model])
+                helper.make_tensor_value_info(
+                    name,
+                    dtype,
+                    [cfg.batch, cfg.seq, cfg.d_model],
+                ),
             )
     return model
 
-
-def _set_temp_file_name(block: onnxblock.blocks.Block, temp_dir: Path, temp_file_name: str) -> onnxblock.blocks.Block:
-    # Block.__init__ hardcodes "temp.onnx" for every instance, so sibling blocks called
-    # back-to-back under the same has_path build collide on temp.onnx.data (onnx.save
-    # refuses to overwrite it). Give each block its own scratch file name instead, under
-    # temp_dir (cfg.union_artifact_dir -- per-config, not the shared process cwd): two
-    # configs/jobs running at once can otherwise collide on an identical tag (e.g. two GPT-2
-    # variants both building "pair0_add_1_add_4"), and clear_stale_temp_files's cleanup
-    # sweep would delete a concurrent job's in-progress scratch file if it swept a shared dir.
-    block.temp_onnx_file_path = str(temp_dir / temp_file_name)
-    block.temp_external_data_file_name = temp_file_name + ".data"
-    return block
-
-
-class MaskedSumLoss(onnxblock.blocks.Block):
-    """loss = sum(downstream * mask). One per per-pair graph.
-
-    ORT training's ReduceSumGrad/Expand hardcodes tensor(float) for the loss's gradient
-    seed, so bf16 (or other non-fp32) forward graphs must be cast to float before
-    ReduceSum -- otherwise gradient graph building fails with a type mismatch on the
-    ReduceSum grad node. `downstream` is cast to float first (rather than casting the
-    Mul's output), so `mask` itself is always plain float32: ONNX's Mul requires both
-    operands to share a dtype, and ORT's Python session.run can't accept bfloat16 numpy
-    arrays as inputs at all (ml_dtypes' bfloat16 isn't a supported input type), so `mask`
-    can never be bf16 in practice. Cast has a well-defined gradient (cast back), so
-    upstream gradients still flow through the rest of the model in its original dtype.
-    """
-
-    def __init__(self, tag: str, temp_dir: Path):
-        super().__init__()
-        _set_temp_file_name(self, temp_dir, f"temp_loss_{tag}.onnx")
-        self._cast = _set_temp_file_name(onnxblock.blocks.Cast(onnx.TensorProto.FLOAT), temp_dir, f"temp_cast_{tag}.onnx")
-        self._mul = _set_temp_file_name(onnxblock.blocks.Mul(), temp_dir, f"temp_mul_{tag}.onnx")
-        self._reduce_sum = _set_temp_file_name(onnxblock.blocks.ReduceSum(keepdims=False), temp_dir, f"temp_reduce_sum_{tag}.onnx")
-
-    def build(self, downstream_name):
-        downstream_f32 = self._cast(downstream_name)
-        masked = self._mul(downstream_f32, "mask")
-        return self._reduce_sum(masked)
+def export_base_model(
+    cfg: ModelConfig,
+    verbose,
+):
+    cfg.dir.mkdir(parents=True, exist_ok=True)
+    model = _load_model(cfg.model)
+    if cfg.random_init:
+        _random_init(model, cfg.random_init_seed)
+    dummy_input = _dummy_input(cfg)
+    if _needs_embeds_kwarg(cfg):
+        args = ({"inputs_embeds": dummy_input},)
+    else:
+        args = (dummy_input,)
+    torch.onnx.export(
+        model,
+        args,
+        str(cfg.base_model_path),
+        input_names=[cfg.input_name],
+        output_names=["output"],
+        verbose=verbose,
+    )
 
 
-def _add_f32_casts(model: onnx.ModelProto, existing: set[str]) -> None:
-    """For every one of `model`'s current graph outputs that isn't float32, appends an
-    in-graph Cast to float32 and makes the *cast* tensor a graph output too (in place),
-    mutating `existing` to track newly-added names.
+def extract_subgraph(
+    input_path: Path,
+    output_path: Path,
+    input_names: list[str],
+    output_names: list[str],
+    check_model: bool = True,
+    infer_shapes: bool = True,
+) -> None:
+    if not os.path.exists(input_path):
+        raise ValueError(f"Invalid input model path: {input_path}")
+    if not output_path:
+        raise ValueError("Output model path shall not be empty!")
+    if not input_names:
+        raise ValueError("Input tensor names shall not be empty!")
+    if not output_names:
+        raise ValueError("Output tensor names shall not be empty!")
 
-    ORT's Python bindings can never convert a bf16 tensor to numpy (session.run and
-    OrtValue.numpy() both raise "No corresponding Numpy type for Tensor Type" -- there's no
-    io_binding workaround, it's baked into the compiled extension), so every bf16 output
-    needs this cast counterpart to ever be fetched from a Python session.run call.
-    """
-    for o in list(model.graph.output):
-        if o.type.tensor_type.elem_type == onnx.TensorProto.FLOAT:
-            continue
-        out_name = f"{o.name}_f32"
-        if out_name in existing:
-            continue
-        model.graph.node.append(helper.make_node("Cast", [o.name], [out_name], to=onnx.TensorProto.FLOAT))
-        model.graph.output.append(helper.make_tensor_value_info(out_name, onnx.TensorProto.FLOAT, None))
-        existing.add(out_name)
+    if len(input_names) != len(set(input_names)):
+        raise ValueError("Duplicate names found in the input tensor names.")
+    if len(output_names) != len(set(output_names)):
+        raise ValueError("Duplicate names found in the output tensor names.")
 
+    if check_model:
+        onnx.checker.check_model(input_path)
 
-def _strip_gradient_accumulators(model: onnx.ModelProto) -> None:
-    """Removes onnxblock's InPlaceAccumulatorV2 ("GradientAccumulator*") nodes, in place.
+    if infer_shapes and os.path.getsize(input_path) > onnx.checker.MAXIMUM_PROTOBUF:
+        onnx.shape_inference.infer_shapes_path(input_path, output_path)
+        model = onnx.load(output_path)
+    elif infer_shapes:
+        model = onnx.load(input_path, load_external_data=False)
+        model = onnx.shape_inference.infer_shapes(model)
+        base_dir = os.path.dirname(input_path)
+        onnx.load_external_data_for_model(model, base_dir)
+    else:
+        model = onnx.load(input_path)
 
-    onnxblock.TrainingBlock.__call__ unconditionally runs build_gradient_accumulation_graph
-    on every training model it builds (no opt-out) -- it swaps each `{param}_grad` graph
-    output for an InPlaceAccumulatorV2 node's own bool "did-it-update" output, wiring the
-    real gradient tensor in as that node's input instead. InPlaceAccumulatorV2 only has a
-    kernel in onnxruntime-training's optimizer runtime, not in a plain inference session, so
-    loading these graphs for a plain forward+backward eval (no optimizer step) needs the
-    accumulator nodes physically gone rather than merely unrequested: onnx.checker and tools
-    that walk every node (as opposed to ORT's own output-driven pruning) still choke on them
-    otherwise, and the dangling `lazy_reset_grad` / `*.accumulation.buffer` inputs linger.
+    e = Extractor(model)
+    extracted = e.extract_model(input_names, output_names)
 
-    The gradient tensor each accumulator consumed (its 2nd input) is left as a normal
-    intermediate node output, ready for a caller to declare as a graph output directly.
-    """
-    accumulator_nodes = [n for n in model.graph.node if n.op_type == "InPlaceAccumulatorV2"]
-    if not accumulator_nodes:
-        return
+    location = os.path.basename(output_path) + ".data"
+    onnx.save(extracted, output_path, save_as_external_data=True, location=location)
 
-    accumulator_outputs = {o for n in accumulator_nodes for o in n.output}
-    for n in accumulator_nodes:
-        model.graph.node.remove(n)
-
-    kept_outputs = [o for o in model.graph.output if o.name not in accumulator_outputs]
-    del model.graph.output[:]
-    model.graph.output.extend(kept_outputs)
-
-    live_inputs = {i for n in model.graph.node for i in n.input}
-    dead_input_names = {"lazy_reset_grad"} | {
-        i.name for i in model.graph.input if i.name.endswith(".accumulation.buffer")
-    }
-    kept_inputs = [
-        i for i in model.graph.input
-        if i.name not in dead_input_names or i.name in live_inputs
-    ]
-    del model.graph.input[:]
-    model.graph.input.extend(kept_inputs)
+    if check_model:
+        onnx.checker.check_model(output_path)
 
 
-def _add_grad_outputs(cfg: ModelConfig, union_model_path: Path) -> None:
-    """Appends each pair's upstream-gradient as a graph output, in place.
-
-    grad_name's dtype matches the model's weight dtype (e.g. bf16): it's the gradient of
-    `upstream`, a bf16 activation, and MaskedSumLoss casts `downstream` to float only for
-    the loss/mask math -- gradients flowing back through the rest of the (bf16) model stay
-    bf16.
-    """
-    model = onnx.load(str(union_model_path))
-    _strip_gradient_accumulators(model)
-    existing = {o.name for o in model.graph.output}
-    weight_dtype = _weight_dtype(model)
-
-    _add_f32_casts(model, existing)
-
-    for grad_name in grad_names(cfg):
-        if grad_name not in existing:
-            model.graph.output.append(
-                helper.make_tensor_value_info(grad_name, weight_dtype, [cfg.batch, cfg.seq, cfg.d_model])
-            )
-            existing.add(grad_name)
-
-    _add_f32_casts(model, existing)
-    onnx.save(model, str(union_model_path))
-
-
-def build_per_pair_artifacts(cfg: ModelConfig) -> list[Path]:
-    cfg.union_artifact_dir.mkdir(parents=True, exist_ok=True)
-    severable_model = _prepare_severable_model(cfg)
-    severable_model_abs = str(Path(severable_model).resolve())
-    union_dir_abs = cfg.union_artifact_dir.resolve()
-    paths = []
-    for pair_idx, (upstream, downstream) in enumerate(cfg.pairs):
-        tag = f"pair{pair_idx}_{upstream}_{downstream}"
-
-       
-        with chdir(union_dir_abs):
-            artifacts.generate_artifacts(
-                severable_model_abs,
-                requires_grad=[upstream],
-                loss_input_names=[downstream],
-                prefix=f"{tag}_",
-                loss=MaskedSumLoss(tag, union_dir_abs),
-                artifact_directory=str(union_dir_abs),
-            )
-        training_model_path = cfg.union_artifact_dir / f"{tag}_training_model.onnx"
-        layer_names = sorted({name for pair in cfg.pairs for name in pair})
-        training_model = onnx.load(str(training_model_path))
-        training_model = _add_layer_value_outputs(training_model, layer_names, cfg)
-        onnx.save(
-            training_model,
-            str(training_model_path),
-            save_as_external_data=True,
-            all_tensors_to_one_file=True,
-            location=f"{tag}_training_model.onnx.data",
-        )
-
-        paths.append(training_model_path)
-
-    return paths
-
-
-def sublayer_gradient_path(cfg: ModelConfig, sublayer_idx: int) -> Path:
-    sublayer = cfg.sublayers[sublayer_idx]
-    tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
-    return cfg.sublayer_gradients_dir / f"{tag}_gradient.onnx"
-
-
-def build_single_pair_gradient_graph(cfg: ModelConfig, sublayer_idx: int, force: bool = False) -> Path:
-    """Builds one sublayer's own independent gradient graph -- same per-pair ORT-training
-    artifact build_per_pair_artifacts uses for each pair on its way into the union graph,
-    except this one is never merged with any other pair's graph and its grad output keeps
-    the plain `{upstream}_grad` name (no pivot-clash renaming -- there's only one pair, so
-    no other pair's tensor can ever collide with it).
-
-    Guarded by a lockfile for the same reason build_gradient_graph needs one: two processes
-    sharing the same `name` could otherwise race on this pair's own artifact directory.
-    """
-    out_path = sublayer_gradient_path(cfg, sublayer_idx)
-    lock_path = out_path.with_suffix(out_path.suffix + ".lock")
+def ensure_base_model(
+    cfg: ModelConfig,
+    force: bool = False,
+    verbose: bool = False,
+):
+    # All ensure methods return a Path
+    """Exports cfg.base_model_path if it doesn't already exist (or always, if force), guarded
+    by a lockfile"""
+    lock_path = cfg.base_model_path.with_suffix(cfg.base_model_path.suffix + ".lock")
     with exclusive_lock(lock_path):
-        if not force and out_path.exists():
-            print(f"Gradient graph already exists, skipping build -> {out_path}")
-            return out_path
-
-        sublayer = cfg.sublayers[sublayer_idx]
-        upstream, downstream = sublayer.input, sublayer.output
-        tag = f"sublayer{sublayer_idx}_{upstream}_{downstream}"
-        sub_graph_path = cfg.per_pair_dir / f"{tag}_subgraph_eval.onnx"
-
-        build_dir = cfg.sublayer_gradients_dir / f"{tag}_build"
-        print("BUILDDIR", build_dir, flush=True)
-        if build_dir.exists():
-            shutil.rmtree(build_dir)
-        build_dir.mkdir(parents=True, exist_ok=True)
-        build_dir_abs = build_dir.resolve()
-        base_scratch_path = build_dir_abs / f"{tag}_base.onnx"
-
-        base_model = onnx.load(str(sub_graph_path))
-        if cfg.needs_layernorm_patch:
-            base_model = _add_layer_norm_stats_outputs(base_model)
-        existing_inputs = {i.name for i in base_model.graph.input}
-        if "mask" not in existing_inputs:
-            # Always float32, regardless of the model's weight dtype: ORT's Python session.run
-            # can't accept bfloat16 numpy inputs, and MaskedSumLoss casts `downstream` to float
-            # before multiplying by `mask` so the dtypes match ONNX's Mul requirement.
-            base_model.graph.input.append(
-                helper.make_tensor_value_info("mask", onnx.TensorProto.FLOAT, [cfg.batch, cfg.seq, cfg.d_model])
+        if not force and cfg.base_model_path.exists():
+            print(
+                f"Base model already exists, skipping export -> {cfg.base_model_path}",
             )
-        onnx.save(base_model, str(base_scratch_path))
-        onnx.checker.check_model(str(base_scratch_path))
-
-        with chdir(build_dir_abs):
-            artifacts.generate_artifacts(
-                str(base_scratch_path),
-                requires_grad=[upstream],
-                loss_input_names=[downstream],
-                prefix=f"{tag}_",
-                loss=MaskedSumLoss(tag, build_dir_abs),
-                artifact_directory=str(build_dir_abs),
-            )
-
-        training_model_path = build_dir / f"{tag}_training_model.onnx"
-        training_model = onnx.load(str(training_model_path))
-        training_model = _add_layer_value_outputs(training_model, [upstream, downstream], cfg)
-        _strip_gradient_accumulators(training_model)
-
-        existing = {o.name for o in training_model.graph.output}
-        weight_dtype = _weight_dtype(training_model)
-        _add_f32_casts(training_model, existing)
-        grad_name = f"{upstream}_grad"
-        if grad_name not in existing:
-            training_model.graph.output.append(
-                helper.make_tensor_value_info(grad_name, weight_dtype, [cfg.batch, cfg.seq, cfg.d_model])
-            )
-            existing.add(grad_name)
-
-        _add_f32_casts(training_model, existing)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        onnx.save(
-            training_model, str(out_path),
-            save_as_external_data=True, all_tensors_to_one_file=True,
-            location=f"{tag}_gradient.onnx.data",
-        )
-        shutil.rmtree(build_dir)
-
-    return out_path
+        else:
+            export_base_model(cfg, verbose)
+            print(f"Base model exported -> {cfg.base_model_path}")
+            if cfg.needs_layernorm_patch:
+                model = onnx.load(str(cfg.base_model_path), load_external_data=False)
+                model = _add_layer_norm_stats_outputs(model)
+                onnx.save(model, str(cfg.base_model_path))
+                print(f"LayerNorm stats outputs added -> {cfg.base_model_path}")
 
 
-
-def clear_stale_temp_files(cfg: ModelConfig) -> None:
-    """Block.__init__ (and _set_temp_file_name) scratch files from a prior run/attempt --
-    onnx.save refuses to overwrite an existing external-data file, so leftovers from a
-    failed or --force-repeated run must be cleared before building starts. Scoped to this
-    config's own cfg.union_artifact_dir (where _set_temp_file_name now places them), not the
-    shared process cwd -- a cwd-wide sweep would delete another config/job's in-progress
-    scratch files if two builds ran concurrently in the same checkout."""
-    if not cfg.union_artifact_dir.exists():
-        return
-    for stale in cfg.union_artifact_dir.glob("temp*.onnx*"):
-        stale.unlink()
-
-
-def extract_sub_graph(cfg: ModelConfig) -> list[Path]:
-    cfg.per_pair_dir.mkdir(parents=True, exist_ok=True)
-
-    paths = []
-    for sublayer_idx, sublayer in enumerate(cfg.sublayers):
-        tag = f"sublayer{sublayer_idx}_{sublayer.input}_{sublayer.output}"
-        sub_graph_path = cfg.per_pair_dir / f"{tag}_subgraph_eval.onnx"
-        onnx.utils.extract_model(
-            str(cfg.base_model_path),
-            str(sub_graph_path),
-            input_names=[sublayer.input],
-            output_names=[sublayer.output],
-        )
-        paths.append(sub_graph_path)
-    return paths
-
-
-def ensure_sub_graphs(cfg: ModelConfig, force: bool = False) -> list[Path]:
+def ensure_subgraphs(
+    cfg: ModelConfig,
+    force: bool = False,
+) -> list[tuple[Path, SublayerConfig]]:
     """Extracts cfg.per_pair_dir's subgraphs if they don't already all exist (or always, if
-    force), guarded by a lockfile for the same reason ensure_base_model needs one: two
-    configs sharing a `name` (and therefore cfg.per_pair_dir) submitted as separate parallel
-    jobs would otherwise race on the same subgraph files -- one job's onnx.utils.extract_model
-    write can land while another job's onnx.checker.check_model read is in flight, corrupting
-    the read with a partial/invalid protobuf."""
-    lock_path = cfg.per_pair_dir.with_name(cfg.per_pair_dir.name + ".lock")
+    force), guarded by a lockfile."""
+
+    cfg.sub_block_path.mkdir(parents=True, exist_ok=True)
+    lock_path = cfg.sub_block_path.with_name(cfg.sub_block_path.name + ".lock")
     paths = [
-        cfg.per_pair_dir / f"sublayer{i}_{s.input}_{s.output}_subgraph_eval.onnx"
-        for i, s in enumerate(cfg.sublayers)
+        (
+            cfg.sub_block_path
+            / f"sublayer{cnt}_{sublayer_conf.input}_{sublayer_conf.output}_subgraph_forward.onnx",
+            sublayer_conf,
+        )
+        for cnt, sublayer_conf in enumerate(cfg.sublayers)
     ]
     with exclusive_lock(lock_path):
-        if not force and all(p.exists() for p in paths):
-            print(f"Sub-graphs already exist, skipping extraction -> {cfg.per_pair_dir}")
-            return paths
-        print("Extracting sub-graphs...")
-        return extract_sub_graph(cfg)
+        for path, sublayer_conf in paths:
+            if not path.exists() or force:
+                extract_subgraph(
+                    input_path=cfg.base_model_path,
+                    output_path=path,
+                    input_names=sublayer_conf.input,
+                    output_names=sublayer_conf.output,
+                )
+                print(f"Extracted subgraph -> {path}")
+            else:
+                print(f"Subgraph already exist, skipping extraction -> {path}")
+
+    return paths
+
+
+def ensure_subgraph_pullback(
+    paths: list[tuple[Path, SublayerConfig]],
+    cfg: ModelConfig,
+    force: bool = False,
+    full_jacobian: bool = False,
+):
+    # Wait on this
+    #
+    # Let's do the rest and see how the ensures will work
+    # Maybe we don't want this path object
+    for path, sublayer in paths:
+        lock_path = path.with_name(path.name + ".lock")
+        with exclusive_lock(lock_path):
+            if not force and lock_path.exists():
+                # This is wrong the path name here is not accurate
+                print(f"Sub-graphs already exist, skipping extraction -> {path}")
+            else:
+                generate_subgraph_pullback(
+                    path,
+                    sublayer.loss_type,
+                    sublayer.input_shape,
+                    sublayer.input,
+                    sublayer.output,
+                )
+
+
+def generate_loss(
+    sub_graph_path: Path,
+    loss_type: LossType,
+    input_shape: list[int] | None,
+) -> tuple[Path, onnxblock.blocks.Block]:
+    mod_path = sub_graph_path.parent / (sub_graph_path.stem + "_mod.onnx")
+    tag = sub_graph_path.stem + "_pullback"
+    loss = onnxblock.blocks.Block()
+    match loss_type:
+        case LossType.MaskedSumLoss:
+            assert input_shape is not None
+            sub_graph_path = _jacobian_modification(
+                sub_graph_path,
+                mod_path,
+                input_shape,
+            )
+            loss = MaskedSumLoss(tag, mod_path.parent)
+        case LossType.SquaredDiffLoss:
+            loss = SquaredDiffLoss()
+        case LossType.NormalizedSquaredDiffLoss:
+            loss = NormalizedSquaredDiffLoss()
+        case _:
+            raise ValueError(f"Invalid loss type: {loss_type}")
+
+    return sub_graph_path, loss
+
+
+def _jacobian_modification(
+    path: Path,
+    save_path: Path,
+    input_shape: list[int],
+) -> Path:
+    base_model = onnx.load(str(path))
+    base_model.graph.input.append(
+        helper.make_tensor_value_info(
+            "mask",
+            onnx.TensorProto.FLOAT,
+            input_shape,
+        ),
+    )
+    onnx.save(
+        base_model,
+        str(save_path),
+        save_as_external_data=True,
+        location=os.path.basename(str(save_path)) + ".data",
+    )
+
+    return save_path
+
+
+def generate_subgraph_pullback(
+    sub_graph_path: Path,
+    loss_type: LossType,
+    input_shape: list[int] | None,
+    input: list[str],
+    output: list[str],
+):
+    # This will always override -- make sure file protection is elsewhere
+
+    """Builds one sublayer's own independent gradient graph"""
+    # ONNX Save removes base_dir info so when saving multiple tensors, we end up with errors
+    # Using the absolute path remedies this directly.
+    sub_graph_path = sub_graph_path.resolve()
+    tag = "_pullback"
+
+    sub_graph_path, loss = generate_loss(
+        sub_graph_path,
+        loss_type,
+        input_shape,
+    )
+
+    with chdir(sub_graph_path.parent):
+        artifacts.generate_artifacts(
+            str(sub_graph_path.name),
+            requires_grad=input,
+            loss_input_names=output,
+            loss=loss,
+            artifact_directory=str(sub_graph_path.parent),
+            prefix=sub_graph_path.stem + tag,
+        )
+    print(f"generated artifacts -> {sub_graph_path}")

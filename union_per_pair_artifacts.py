@@ -146,7 +146,7 @@ def build_union_artifacts(training_model_paths: list[str], out_path: str) -> Non
     merged_model = _merge_graphs(models)
     onnx.checker.check_model(merged_model)
 
-    onnx.save(merged_model, out_path, save_as_external_data=True)
+    onnx.save(merged_model, out_path, save_as_external_data=True, format="onnxtxt")
 
     print(f"union inputs: {[i.name for i in merged_model.graph.input]}")
     print(f"union outputs: {[o.name for o in merged_model.graph.output]}")

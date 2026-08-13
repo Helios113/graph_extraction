@@ -6,7 +6,11 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "datasets>=5.0.0",
     "h5py>=3.16.0",
+    "ipykernel>=7.3.0",
+    "ipywidgets>=8.1.8",
+    "jupyter>=1.1.1",
     "matplotlib>=3.11.1",
+    "notebook>=7.6.1",
     "onnx>=1.22.0",
     "onnxruntime-training>=1.19.2",
     "onnxscript>=0.7.1",
@@ -16,17 +20,38 @@ dependencies = [
     "transformers>=5.14.1",
 ]
 
-# onnx is installed editable from ../onnx (a local clone of github.com/onnx/onnx, pinned to
-# v1.22.0) so it can be patched directly. Rebuilding it (uv sync/lock after editing the clone)
-# requires: SKBUILD_CMAKE_DEFINE="ONNX_BUILD_CUSTOM_PROTOBUF=ON" uv sync
-# -- the system's libprotobuf.a isn't built with -fPIC, so linking onnx's Python extension
-# against it fails; that flag makes the build fetch and compile its own protobuf instead.
-# [tool.uv.sources]
-# onnx = { path = "../onnx", editable = true }
 
-# onnxruntime-training is built from source (see ort_build_logs/build_ort.sh) against CUDA
+# onnxruntime-training is built from source (see onnxruntime/training_builds/) against CUDA
 # 12.8 for the H100 (sm_90) -- the PyPI wheel's CUDA EP is linked against CUDA 11 libs that
 # don't exist on this cluster, and PyPI has no CUDA-12 GPU build of onnxruntime-training at
-# all. This local wheel adds real bf16 CPU/CUDA kernel coverage that PyPI's build lacks.
+# all. This local build adds real bf16 CPU/CUDA kernel coverage that PyPI's build lacks.
+#
+# NOT editable: setup.py assumes it only ever runs via build.py's own subprocess invocation
+# (CLI flags for package_name, a sys.path hack expecting onnxruntime/python/ as its own
+# sibling dir, docs/LICENSE/requirements co-located) -- none of which hold under uv's PEP 517
+# editable-build (isolated build env, no argv passthrough by default). Pointing at the wheel
+# instead sidesteps all of that; for a live Python-only edit loop against the onnxruntime
+# worktree without reinstalling, see onnxruntime/training_builds/dev_link.sh instead, which
+# drops a .pth file into this venv's site-packages.
 [tool.uv.sources]
-onnxruntime-training = { path = "ort_build_logs/wheel/onnxruntime_training-1.19.2+cu128-cp311-cp311-linux_x86_64.whl" }
+onnxruntime-training = { path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" }
+
+[tool.uv]
+compile-bytecode = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.2",
+    "ty>=0.0.71",
+]
+
+[tool.ruff.lint]
+# Only rule enabled for now: require a trailing comma on defs/calls that are
+# already multi-line, so `ruff format` preserves the multi-line signature
+# instead of collapsing it back to one line (magic trailing comma).
+select = ["COM812"]
+
+[tool.ty.rules]
+# Type checking is informational only for now -- surface issues as warnings
+# (editor highlights) instead of errors, so nothing is blocked/enforced.
+all = "warn"
