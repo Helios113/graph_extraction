@@ -1,3 +1,4 @@
+from huggingface_hub.hf_api import PaperAuthor
 import contextlib
 import importlib
 import os
@@ -173,8 +174,8 @@ def export_base_model(
 def extract_subgraph(
     input_path: Path,
     output_path: Path,
-    input_names: list[str],
-    output_names: list[str],
+    input_names: str,
+    output_names: str,
     check_model: bool = True,
     infer_shapes: bool = True,
 ) -> None:
@@ -187,15 +188,15 @@ def extract_subgraph(
     if not output_names:
         raise ValueError("Output tensor names shall not be empty!")
 
-    if len(input_names) != len(set(input_names)):
-        print(input_names, flush=True)
-        print(set(input_names), flush=True)
-        print(len(input_names), flush=True)
-        print(len(set(input_names)), flush=True)
+    # if len(input_names) != len(set(input_names)):
+    #     print(input_names, flush=True)
+    #     print(set(input_names), flush=True)
+    #     print(len(input_names), flush=True)
+    #     print(len(set(input_names)), flush=True)
 
-        raise ValueError("Duplicate names found in the input tensor names.")
-    if len(output_names) != len(set(output_names)):
-        raise ValueError("Duplicate names found in the output tensor names.")
+        # raise ValueError("Duplicate names found in the input tensor names.")
+    # if len(output_names) != len(set(output_names)):
+    #     raise ValueError("Duplicate names found in the output tensor names.")
 
     if check_model:
         onnx.checker.check_model(input_path)
@@ -212,13 +213,12 @@ def extract_subgraph(
         model = onnx.load(input_path)
 
     e = Extractor(model)
-    extracted = e.extract_model(input_names, output_names)
+    extracted = e.extract_model([input_names], [output_names])
 
     location = os.path.basename(output_path) + ".data"
     onnx.save(extracted, output_path, save_as_external_data=True, location=location)
 
-    if check_model:
-        onnx.checker.check_model(output_path)
+    onnx.checker.check_model(output_path)
 
 
 def ensure_base_model(
@@ -248,6 +248,7 @@ def ensure_base_model(
 def ensure_subgraphs(
     cfg: ModelConfig,
     force: bool = False,
+    do_not_materialise_subgraphs: bool = False
 ) -> list[tuple[Path, SublayerConfig]]:
     """Extracts cfg.per_pair_dir's subgraphs if they don't already all exist (or always, if
     force), guarded by a lockfile."""
@@ -262,6 +263,8 @@ def ensure_subgraphs(
         )
         for cnt, sublayer_conf in enumerate(cfg.sublayers)
     ]
+    if do_not_materialise_subgraphs:
+        return paths
     for path, sublayer_conf in paths:
         lock_path = path.with_name(path.name + ".lock")
         with exclusive_lock(lock_path):
@@ -282,23 +285,32 @@ def ensure_subgraphs(
 def ensure_subgraph_pullback(
     paths: list[tuple[Path, SublayerConfig]],
     force: bool = False,
-):
+    base_model_path: Path|None = None,
+) -> dict[str, list[Path]]:
+    generated_paths = {}
+
     for path, sublayer_conf in paths:
         pullback_path = path.with_name(path.stem+"_pullback.onnx")
         lock_path = path.with_name(pullback_path.name + ".lock")
         with exclusive_lock(lock_path):
              if not pullback_path.exists() or force:
-                 generate_subgraph_pullback(
+                 res = generate_subgraph_pullback(
                      path,
                      sublayer_conf.loss_type,
                      sublayer_conf.input_shape,
                      sublayer_conf.input,
                      sublayer_conf.output,
+                     base_model_path=base_model_path,
                  )
+                 for k, v in res.items():
+                     generated_paths.setdefault(k, []).append(v)
                  print(f"Extracted subgraph -> {path}")
              else:
+                 generated_paths.setdefault("gradient", []).append(pullback_path)
                  print(f"Subgraph pullbac already exist, skipping extraction -> {path}")
+                 print(f"Subgraph pullbac already exist, have not checked for optimizer -> {path}")
 
+    return generated_paths
 
 def generate_loss(
     sub_graph_path: Path,
@@ -356,8 +368,9 @@ def generate_subgraph_pullback(
     sub_graph_path: Path,
     loss_type: LossType,
     input_shape: list[int] | None,
-    input: list[str],
-    output: list[str],
+    input: str,
+    output: str,
+    base_model_path: Path | None = None
 ) -> dict[str, Path]:
     # This will always override -- make sure file protection is elsewhere
 
@@ -367,21 +380,128 @@ def generate_subgraph_pullback(
     sub_graph_path = sub_graph_path.resolve()
     tag = "_pullback"
 
-    sub_graph_path, loss = generate_loss(
-        sub_graph_path,
+    model_path, loss = generate_loss(
+        base_model_path or sub_graph_path,
         loss_type,
         input_shape,
     )
 
     prefix = sub_graph_path.stem + tag
     generated_paths = generate_artifacts(
-        sub_graph_path,
+        model_path,
         save_directory=sub_graph_path.parent,
-        requires_grad=input,
-        loss_input_names=output,
+        requires_grad=[input],
+        loss_input_names=[output],
         loss=loss,
-        gradient_model_name=f"{prefix}_gradient_model.onnx",
-        loss_model_name=f"{prefix}_loss_model.onnx",
-        optimizer_model_name=f"{prefix}_optimizer_model.onnx",
+        gradient_model_name=f"{prefix}.onnx",
+        save_loss_model = False,
+        optimizer_model_name=f"{prefix}_optimizer.onnx",
     )
+    if "mod" in str(model_path):
+        os.remove(model_path)
+        os.remove(model_path.with_name(model_path.name + ".data"))
+
     return generated_paths
+
+
+def _rename_tensor(graph: onnx.GraphProto, old_name: str, new_name: str) -> None:
+    for n in graph.node:
+        n.input[:] = [new_name if x == old_name else x for x in n.input]
+        n.output[:] = [new_name if x == old_name else x for x in n.output]
+    for coll in (graph.initializer, graph.value_info, graph.input, graph.output):
+        for entry in coll:
+            if entry.name == old_name:
+                print(old_name, new_name)
+                entry.name = new_name
+
+
+
+def _align_pivot_casts(base_graph: onnx.GraphProto, graph: onnx.GraphProto) -> None:
+    """Rename `graph`'s Cast-of-pivot-tensor nodes to match `base_graph`'s equivalents.
+
+    ORT's artifact generator names auto-inserted nodes off a build-order counter that's
+    perturbed by each pair's distinct loss attachment point, so independently-generated
+    per-pair graphs can end up with differently-named (but functionally identical) Cast
+    nodes wrapping the same shared tensor -- e.g. `Cast(add_8)` comes out as
+    `onnx::Cast::2 -> onnx::cast.output::1` in one graph and `node__to_copy_7 -> _to_copy_7`
+    in another. Both consume the same shared-forward-pass tensor and are otherwise
+    identical, so they're the same node wearing a different name; align them before the
+    by-name merge runs, or the merge will (correctly, but unhelpfully) reject them as
+    conflicting.
+    """
+    base_casts: dict[str, onnx.NodeProto] = {}
+    for n in base_graph.node:
+        if n.op_type == "Cast" and len(n.input) == 1:
+            base_casts.setdefault(n.input[0], n)
+    # print("base_casts", base_casts)
+    for n in graph.node:
+        if n.op_type != "Cast" or len(n.input) != 1:
+            continue
+        base_n = base_casts.get(n.input[0])
+        if base_n is None or base_n.name == n.name:
+            continue
+        if base_n.attribute != n.attribute:
+            continue
+        _rename_tensor(graph, n.output[0], base_n.output[0])
+        n.name = base_n.name
+
+def generate_union_of_subgraphs(paths: list[Path]):
+
+
+    base = onnx.load(paths[0])
+    merged_graph = onnx.GraphProto()
+    merged_graph.CopyFrom(base.graph)
+
+    node_by_name = {n.name: n for n in merged_graph.node}
+    init_by_name = {i.name: i for i in merged_graph.initializer}
+    vi_by_name = {v.name: v for v in merged_graph.value_info}
+    output_names = {o.name for o in merged_graph.output}
+
+    for pair_idx, path in enumerate(paths[1:], start=1):
+        g = onnx.load(path).graph
+        _align_pivot_casts(merged_graph, g)
+        # _resolve_pivot_clashes(merged_graph, g, tag=f"pair{pair_idx}")
+
+        for i in g.input:
+            if i.name not in {inp.name for inp in merged_graph.input}:
+                merged_graph.input.append(i)
+
+        for n in g.node:
+            existing = node_by_name.get(n.name)
+            if existing is not None:
+                if existing.SerializeToString() != n.SerializeToString():
+                    raise ValueError(f"node {n.name!r} differs between graphs; cannot union")
+                continue
+            merged_graph.node.append(n)
+            node_by_name[n.name] = n
+
+        for i in g.initializer:
+            existing = init_by_name.get(i.name)
+            if existing is not None:
+                if existing.raw_data != i.raw_data or list(existing.dims) != list(i.dims):
+                    raise ValueError(f"initializer {i.name!r} differs between graphs; cannot union")
+                continue
+            merged_graph.initializer.append(i)
+            init_by_name[i.name] = i
+
+        for v in g.value_info:
+            if v.name not in vi_by_name:
+                merged_graph.value_info.append(v)
+                vi_by_name[v.name] = v
+
+        for o in g.output:
+            if o.name not in output_names:
+                merged_graph.output.append(o)
+                output_names.add(o.name)
+
+    # Not "union_" + "_".join(graph names): every per-pair graph is itself named
+    # "main_graph" (onnxblock's artifact-generator default), so that would repeat
+    # "main_graph" once per pair (e.g. "union_main_graph_main_graph_main_graph...") --
+    # cosmetic, but it's the garbled name ORT's own Memcpy-node warning prints.
+    merged_graph.name = f"union_pairs"
+
+    merged_model = onnx.ModelProto()
+    merged_model.CopyFrom(base)
+    merged_model.graph.CopyFrom(merged_graph)
+    onnx.save(merged_model, "test.onnx")
+    # return merged_model

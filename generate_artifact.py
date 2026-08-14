@@ -49,6 +49,8 @@ def generate_artifacts(
 
         def build(self, *inputs_to_loss):
             # If loss_input_names is passed, only pass the specified input names to the loss function.
+            print("Inputs to loss at build top", inputs_to_loss)
+
             if self._loss_input_names:
                 inputs_to_loss = self._loss_input_names
 
@@ -65,7 +67,7 @@ def generate_artifacts(
                     return (*loss_output, *tuple(additional_output_names))
                 else:
                     return (loss_output, *tuple(additional_output_names))
-
+            print("input to loss", inputs_to_loss)
             return self._loss(*inputs_to_loss)
 
     gradients_block = _GradientsBlock(loss, loss_input_names)
@@ -102,6 +104,8 @@ def generate_artifacts(
     if gradient_model_path.exists():
         logging.info("gradients model path %s already exists. Overwriting.", gradient_model_path)
     _save_with_data_file(gradients_model, gradient_model_path, f"{gradient_model_name}.data")
+    onnx.checker.check_model(gradient_model_path)
+
     return_dict={"gradient": gradient_model_path}
 
 
@@ -112,6 +116,7 @@ def generate_artifacts(
         if loss_model_path.exists():
             logging.info("loss model path %s already exists. Overwriting.", loss_model_path)
         _save_with_data_file(loss_model, loss_model_path, f"{loss_model_name}.data")
+        onnx.checker.check_model(loss_model_path)
 
         logging.info("Saved loss model to %s", loss_model_path)
         return_dict["loss"] = loss_model_path
@@ -149,6 +154,8 @@ def generate_artifacts(
 
     optimizer_model_path = save_directory / optimizer_model_name
     _save_with_data_file(optim_model, optimizer_model_path, f"{optimizer_model_name}.data")
+    onnx.checker.check_model(optimizer_model_path)
+
     logging.info("Saved optimizer model to %s", optimizer_model_path)
     return_dict["optimizer"] =optimizer_model_path
 

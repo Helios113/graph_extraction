@@ -39,8 +39,8 @@ class InputSourceConfig:
 class SublayerConfig:
     loss_type: LossType
     input_shape: list[int]
-    output: list[str]
-    input: list[str]
+    output: str
+    input: str
 
     def __post_init__(self):
             if isinstance(self.loss_type, str):

@@ -2,3 +2,4 @@ ort_build_logs/*
 *.pyc
 *.h5
 *.onnx.data
+onnx_models/*

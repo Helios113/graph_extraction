@@ -34,8 +34,8 @@ class MaskedSumLoss(
             f"temp_reduce_sum_{tag}.onnx",
         )
 
-    def build(self, downstream_name):
-        downstream_f32 = self._cast(downstream_name)
+    def build(self, output):
+        downstream_f32 = self._cast(output)
         masked = self._mul(downstream_f32, "mask")
         return self._reduce_sum(masked)
 

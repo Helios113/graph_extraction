@@ -4,7 +4,7 @@
   "disable_ai": true,
   "languages": {
     "Python": {
-      "language_servers": ["ty", "ruff", "!basedpyright", "!pyright", "..."]
+      "language_servers": ["ty", "ruff"]
     }
   }
 }
