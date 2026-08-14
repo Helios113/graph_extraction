@@ -498,7 +498,7 @@ def generate_union_of_subgraphs(paths: list[Path]):
     # "main_graph" (onnxblock's artifact-generator default), so that would repeat
     # "main_graph" once per pair (e.g. "union_main_graph_main_graph_main_graph...") --
     # cosmetic, but it's the garbled name ORT's own Memcpy-node warning prints.
-    merged_graph.name = f"union_pairs"
+    merged_graph.name = f"union_pairs
 
     merged_model = onnx.ModelProto()
     merged_model.CopyFrom(base)

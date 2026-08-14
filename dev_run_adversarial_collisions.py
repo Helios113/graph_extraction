@@ -24,8 +24,15 @@ force = False
 # %%
 
 # clear_stale_temp_files(cfg)
+#
+#
+# Document
 ensure_base_model(cfg, force=force, verbose=False)
-sub_graphs = ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=True)
+ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=True)
+
+
+
+# sub_graphs =
 # output = ensure_subgraph_pullback(sub_graphs, force=force)
 # print(output)
 
