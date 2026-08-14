@@ -24,7 +24,7 @@ norm_spread = 1e-3
 
 
 [[sublayers]]
-input = "add_6"
-output = "add_8"
+input = ["add_6"]
+output = ["add_8"]
 loss_type = "MaskedSumLoss"
 input_shape = [32, 8, 896]

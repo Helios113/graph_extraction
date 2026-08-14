@@ -1,3 +1,4 @@
+from loss import AdversarialLoss_SquaredDiffLoss, AdversarialLoss_NormalizedSquaredDiffLoss, AdversarialLoss_EnvelopeDiffLoss
 
 import enum
 import tomllib
@@ -7,9 +8,10 @@ ONNX_DIR = Path("onnx_models")
 
 from enum import Enum
 class LossType(Enum):
-    MaskedSumLoss = 1
-    SquaredDiffLoss = 2
-    NormalizedSquaredDiffLoss = 3
+    MaskedSumLoss = "MaskedSumLoss"
+    AdversarialLoss_SquaredDiffLoss = "AdversarialLoss_SquaredDiffLoss"
+    AdversarialLoss_NormalizedSquaredDiffLoss = "AdversarialLoss_NormalizedSquaredDiffLoss"
+    AdversarialLoss_EnvelopeDiffLoss = "AdversarialLoss_EnvelopeDiffLoss"
 
 
 @dataclass
@@ -39,6 +41,10 @@ class SublayerConfig:
     input_shape: list[int]
     output: list[str]
     input: list[str]
+
+    def __post_init__(self):
+            if isinstance(self.loss_type, str):
+                self.loss_type = LossType(self.loss_type)
 
 
 PIPELINES = ("jacobians", "activations", "collisions", "collision_opt", "sublayer_jacobians")

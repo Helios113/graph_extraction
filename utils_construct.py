@@ -1,7 +1,3 @@
-"""
-Usage: uv run python3 convert_model.py configs/gpt2.toml
-"""
-
 import contextlib
 import importlib
 import os
@@ -10,7 +6,6 @@ import time
 from pathlib import Path
 
 import onnx
-import onnxruntime.training.artifacts as artifacts
 import onnxruntime.training.onnxblock as onnxblock
 import torch
 from matplotlib.pylab import full
@@ -18,9 +13,9 @@ from onnx import helper
 from onnx.utils import Extractor
 from PIL.ImImagePlugin import i
 from transformers.models.auto import AutoModelForCausalLM
-
+from generate_artifact import generate_artifacts
 from config import LossType, ModelConfig, SublayerConfig, grad_names
-from loss import MaskedSumLoss, NormalizedSquaredDiffLoss, SquaredDiffLoss
+from loss import MaskedSumLoss, AdversarialLoss_EnvelopeDiffLoss, AdversarialLoss_SquaredDiffLoss, AdversarialLoss_NormalizedSquaredDiffLoss
 from union_per_pair_artifacts import build_union_artifacts
 
 
@@ -193,6 +188,11 @@ def extract_subgraph(
         raise ValueError("Output tensor names shall not be empty!")
 
     if len(input_names) != len(set(input_names)):
+        print(input_names, flush=True)
+        print(set(input_names), flush=True)
+        print(len(input_names), flush=True)
+        print(len(set(input_names)), flush=True)
+
         raise ValueError("Duplicate names found in the input tensor names.")
     if len(output_names) != len(set(output_names)):
         raise ValueError("Duplicate names found in the output tensor names.")
@@ -253,7 +253,7 @@ def ensure_subgraphs(
     force), guarded by a lockfile."""
 
     cfg.sub_block_path.mkdir(parents=True, exist_ok=True)
-    lock_path = cfg.sub_block_path.with_name(cfg.sub_block_path.name + ".lock")
+
     paths = [
         (
             cfg.sub_block_path
@@ -262,8 +262,9 @@ def ensure_subgraphs(
         )
         for cnt, sublayer_conf in enumerate(cfg.sublayers)
     ]
-    with exclusive_lock(lock_path):
-        for path, sublayer_conf in paths:
+    for path, sublayer_conf in paths:
+        lock_path = path.with_name(path.name + ".lock")
+        with exclusive_lock(lock_path):
             if not path.exists() or force:
                 extract_subgraph(
                     input_path=cfg.base_model_path,
@@ -280,28 +281,23 @@ def ensure_subgraphs(
 
 def ensure_subgraph_pullback(
     paths: list[tuple[Path, SublayerConfig]],
-    cfg: ModelConfig,
     force: bool = False,
-    full_jacobian: bool = False,
 ):
-    # Wait on this
-    #
-    # Let's do the rest and see how the ensures will work
-    # Maybe we don't want this path object
-    for path, sublayer in paths:
-        lock_path = path.with_name(path.name + ".lock")
+    for path, sublayer_conf in paths:
+        pullback_path = path.with_name(path.stem+"_pullback.onnx")
+        lock_path = path.with_name(pullback_path.name + ".lock")
         with exclusive_lock(lock_path):
-            if not force and lock_path.exists():
-                # This is wrong the path name here is not accurate
-                print(f"Sub-graphs already exist, skipping extraction -> {path}")
-            else:
-                generate_subgraph_pullback(
-                    path,
-                    sublayer.loss_type,
-                    sublayer.input_shape,
-                    sublayer.input,
-                    sublayer.output,
-                )
+             if not pullback_path.exists() or force:
+                 generate_subgraph_pullback(
+                     path,
+                     sublayer_conf.loss_type,
+                     sublayer_conf.input_shape,
+                     sublayer_conf.input,
+                     sublayer_conf.output,
+                 )
+                 print(f"Extracted subgraph -> {path}")
+             else:
+                 print(f"Subgraph pullbac already exist, skipping extraction -> {path}")
 
 
 def generate_loss(
@@ -311,7 +307,7 @@ def generate_loss(
 ) -> tuple[Path, onnxblock.blocks.Block]:
     mod_path = sub_graph_path.parent / (sub_graph_path.stem + "_mod.onnx")
     tag = sub_graph_path.stem + "_pullback"
-    loss = onnxblock.blocks.Block()
+    print (loss_type)
     match loss_type:
         case LossType.MaskedSumLoss:
             assert input_shape is not None
@@ -321,10 +317,12 @@ def generate_loss(
                 input_shape,
             )
             loss = MaskedSumLoss(tag, mod_path.parent)
-        case LossType.SquaredDiffLoss:
-            loss = SquaredDiffLoss()
-        case LossType.NormalizedSquaredDiffLoss:
-            loss = NormalizedSquaredDiffLoss()
+        case LossType.AdversarialLoss_SquaredDiffLoss:
+            loss = AdversarialLoss_SquaredDiffLoss()
+        case LossType.AdversarialLoss_NormalizedSquaredDiffLoss:
+            loss = AdversarialLoss_NormalizedSquaredDiffLoss()
+        case LossType.AdversarialLoss_EnvelopeDiffLoss:
+            loss = AdversarialLoss_EnvelopeDiffLoss()
         case _:
             raise ValueError(f"Invalid loss type: {loss_type}")
 
@@ -360,7 +358,7 @@ def generate_subgraph_pullback(
     input_shape: list[int] | None,
     input: list[str],
     output: list[str],
-):
+) -> dict[str, Path]:
     # This will always override -- make sure file protection is elsewhere
 
     """Builds one sublayer's own independent gradient graph"""
@@ -375,13 +373,15 @@ def generate_subgraph_pullback(
         input_shape,
     )
 
-    with chdir(sub_graph_path.parent):
-        artifacts.generate_artifacts(
-            str(sub_graph_path.name),
-            requires_grad=input,
-            loss_input_names=output,
-            loss=loss,
-            artifact_directory=str(sub_graph_path.parent),
-            prefix=sub_graph_path.stem + tag,
-        )
-    print(f"generated artifacts -> {sub_graph_path}")
+    prefix = sub_graph_path.stem + tag
+    generated_paths = generate_artifacts(
+        sub_graph_path,
+        save_directory=sub_graph_path.parent,
+        requires_grad=input,
+        loss_input_names=output,
+        loss=loss,
+        gradient_model_name=f"{prefix}_gradient_model.onnx",
+        loss_model_name=f"{prefix}_loss_model.onnx",
+        optimizer_model_name=f"{prefix}_optimizer_model.onnx",
+    )
+    return generated_paths

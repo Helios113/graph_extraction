@@ -16,8 +16,18 @@ Go to makespace -- get the headphones off
 Eat
 
 Then unify all code for subgraphs and pair jaocibans
-  Subfunction that generates pair subgraphs
-  Make sub function that creates the loss
-  Make sub function that creates the jacobian
+  Make sub function that creates a model -- done
+  Make sub function that extracts subgraphs -- done
+  Make sub function that generates the gradient of a subgraphs -- done
+      Make sub function that creates the loss -- done
+      Make sub function that creates the jacobian mask -- done
+  
 
-  Then arrange into high level functions that just call the sub functions
+  There are two cases now where I would like to improve
+    - first getting a jacobian of a graph without extracting
+      - All jacobians with real activations
+    - getting a twin loss for adversarial things
+      - getting a loss function which takes a specific input
+
+
+BLAS checking

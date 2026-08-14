@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "beartype>=0.22.9",
     "datasets>=5.0.0",
     "h5py>=3.16.0",
     "ipykernel>=7.3.0",
