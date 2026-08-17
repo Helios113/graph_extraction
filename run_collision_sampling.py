@@ -7,7 +7,7 @@ Usage: uv run python3 collisions/run_pipeline.py configs/qwen_block0_collisions.
 import argparse
 
 from config import load_config
-from utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs
+from construct.utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs
 from optimise_activations import compute_max_norm
 
 

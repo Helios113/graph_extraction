@@ -7,7 +7,7 @@ Usage: uv run python3 collision_opt/run_pipeline.py configs/x.toml
 import argparse
 
 from config import load_config
-from utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs
+from construct.utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs
 from build_twin_graph import build_twin_training_model
 from optimize import run_collision_opt
 

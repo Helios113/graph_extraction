@@ -1,4 +1,4 @@
-from loss import AdversarialLoss_SquaredDiffLoss, AdversarialLoss_NormalizedSquaredDiffLoss, AdversarialLoss_EnvelopeDiffLoss
+from construct.loss import AdversarialLoss_SquaredDiffLoss, AdversarialLoss_NormalizedSquaredDiffLoss, AdversarialLoss_EnvelopeDiffLoss
 
 import enum
 import tomllib

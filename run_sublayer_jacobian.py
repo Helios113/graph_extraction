@@ -10,7 +10,7 @@ import argparse
 from config import load_config
 from utils_compute import compute_sublayer_jacobian
 from utils_post import save_sublayer_jacobian
-from utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs, build_single_pair_gradient_graph
+from construct.utils_construct import ensure_base_model, clear_stale_temp_files, ensure_sub_graphs, build_single_pair_gradient_graph
 
 
 def main():

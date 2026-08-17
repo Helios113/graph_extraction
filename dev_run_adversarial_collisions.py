@@ -2,15 +2,14 @@
 
 from pathlib import Path
 
-from build_twin_graph import build_twin_training_model
 from config import SublayerConfig, load_config
-from utils_construct import (
+from construct.construct import (
     ensure_base_model,
     ensure_subgraph_pullback,
     ensure_subgraphs,
     generate_subgraph_pullback,
-    generate_union_of_subgraphs,
 )
+from construct.subgraph_extract import generate_union_of_subgraphs
 
 # from optimize import run_collision_opt
 

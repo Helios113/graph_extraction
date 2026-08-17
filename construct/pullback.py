@@ -6,9 +6,9 @@ import onnxruntime.training.onnxblock as onnxblock
 from onnx import helper
 
 from config import LossType
-from fs_utils import _strip_last_quantifier
-from generate_artifact import generate_artifacts
-from loss import (
+from construct.fs_utils import _strip_last_quantifier
+from construct.generate_artifact import generate_artifacts
+from construct.loss import (
     AdversarialLoss_EnvelopeDiffLoss,
     AdversarialLoss_NormalizedSquaredDiffLoss,
     AdversarialLoss_SquaredDiffLoss,

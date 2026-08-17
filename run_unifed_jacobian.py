@@ -8,7 +8,7 @@ import argparse
 import shutil
 
 from config import load_config
-from utils_construct import ensure_base_model, build_per_pair_artifacts, build_union_artifacts, exclusive_lock, clear_stale_temp_files, _add_grad_outputs
+from construct.utils_construct import ensure_base_model, build_per_pair_artifacts, build_union_artifacts, exclusive_lock, clear_stale_temp_files, _add_grad_outputs
 from utils_post import (
     compute_diagonal_jacobians, sample_diagonal_jacobians, sample_diagonal_jacobians_slogdet,
     save_diagonal_jacobians, save_diagonal_jacobians_svd,

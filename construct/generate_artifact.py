@@ -4,7 +4,7 @@
 import logging
 from pathlib import Path
 from enum import Enum
-from tmp_file import set_temp_file_name
+from construct.onnx_block_utils import set_temp_file_name
 import onnx
 
 from onnxruntime.training import onnxblock

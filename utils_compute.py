@@ -3,7 +3,7 @@ import onnxruntime as ort
 from tqdm import tqdm
 
 from config import ModelConfig
-from utils_construct import sublayer_gradient_path
+from construct.utils_construct import sublayer_gradient_path
 from utils_post import (
     _session_options, sample_jacobian_points, _save_activations,
 )

@@ -1,8 +1,7 @@
 from pathlib import Path
 
-import onnx
 import onnxruntime.training.onnxblock as onnxblock
-from tmp_file import set_temp_file_name
+from construct.onnx_block_utils import set_temp_file_name
 
 class MaskedSumLoss(
     onnxblock.blocks.Block,
