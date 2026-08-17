@@ -20,11 +20,11 @@ class MaskedSumLoss(
     def __init__(self, tag: str, temp_dir: Path):
         super().__init__()
         _set_temp_file_name(self, temp_dir, f"temp_loss_{tag}.onnx")
-        self._cast = _set_temp_file_name(
-            onnxblock.blocks.Cast(onnx.TensorProto.FLOAT),
-            temp_dir,
-            f"temp_cast_{tag}.onnx",
-        )
+        # self._cast = _set_temp_file_name(
+        #     onnxblock.blocks.Cast(onnx.TensorProto.FLOAT),
+        #     temp_dir,
+        #     f"temp_cast_{tag}.onnx",
+        # )
         self._mul = _set_temp_file_name(
             onnxblock.blocks.Mul(), temp_dir, f"temp_mul_{tag}.onnx"
         )
@@ -35,8 +35,8 @@ class MaskedSumLoss(
         )
 
     def build(self, output):
-        downstream_f32 = self._cast(output)
-        masked = self._mul(downstream_f32, "mask")
+        # downstream_f32 = self._cast(output)
+        masked = self._mul(output, "mask")
         return self._reduce_sum(masked)
 
 

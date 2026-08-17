@@ -87,6 +87,7 @@ def generate_artifacts(
             gradients_block.requires_grad(arg, False)
 
     with onnxblock.base(loaded_model, str(model_path)):
+        print("output names", [output.name for output in loaded_model.graph.output])
         _ = gradients_block(*[output.name for output in loaded_model.graph.output])
         gradients_model, loss_model = gradients_block.to_model_proto()
         model_params = gradients_block.parameters()

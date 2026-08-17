@@ -1381,7 +1381,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "notebook", specifier = ">=7.6.1" },
     { name = "onnx", specifier = ">=1.22.0" },
-    { name = "onnxruntime-training", url = "https://github.com/Helios113/onnxruntime/releases/download/grad-1.20.0/onnxruntime_training-1.20.0%2Bcu128-cp311-cp311-linux_x86_64.whl" },
+    { name = "onnxruntime-training", path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" },
     { name = "onnxscript", specifier = ">=0.7.1" },
     { name = "scikit-learn", specifier = ">=1.9.0" },
     { name = "scipy", specifier = ">=1.17.1" },
@@ -1648,7 +1648,7 @@ wheels = [
 [[package]]
 name = "onnxruntime-training"
 version = "1.20.0+cu128"
-source = { url = "https://github.com/Helios113/onnxruntime/releases/download/grad-1.20.0/onnxruntime_training-1.20.0%2Bcu128-cp311-cp311-linux_x86_64.whl" }
+source = { path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" }
 dependencies = [
     { name = "cerberus" },
     { name = "flatbuffers" },
@@ -1661,7 +1661,7 @@ dependencies = [
     { name = "sympy" },
 ]
 wheels = [
-    { url = "https://github.com/Helios113/onnxruntime/releases/download/grad-1.20.0/onnxruntime_training-1.20.0%2Bcu128-cp311-cp311-linux_x86_64.whl", hash = "sha256:0c7f2dccb6745f7548beef0637cc9e145e6e6c389a47c57863ccaf59059ff7c7" },
+    { filename = "onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl", hash = "sha256:446c8a098e5f6452b12e3ad20b03b542b241db5d252b124884af10f3127e164a" },
 ]
 
 [package.metadata]

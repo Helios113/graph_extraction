@@ -28,11 +28,11 @@ force = False
 #
 # Document
 ensure_base_model(cfg, force=force, verbose=False)
-ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=True)
 
 
 
-# sub_graphs =
+
+sub_graphs = ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=True)
 # output = ensure_subgraph_pullback(sub_graphs, force=force)
 # print(output)
 
