@@ -15,14 +15,66 @@ from construct.loss import (
     MaskedSumLoss,
 )
 
+import numpy as np
+from onnx import numpy_helper
+
+
+def _add_loss_inputs(
+    path: Path,
+    save_dir: Path,
+    tag: str,
+    new_inputs: list[tuple[str, int, list[int]]] | None = None,
+    trainable: dict[str, np.ndarray] | None = None,
+) -> Path:
+    """Adds runtime-only inputs and/or makes existing inputs trainable.
+
+    new_inputs: (name, dtype, shape) tuples appended as fresh graph
+        inputs, fed every step, never touched by the optimizer.
+    trainable: {name: init_value} for graph inputs (new or pre-existing)
+        that should also get an initializer, giving them a default value
+        the optimizer can update between steps.
+    """
+    save_path = save_dir / f"{path.stem}_{tag}.onnx"
+    data_filename = f"{save_path.name}.data"
+
+    model = onnx.load(str(path))
+
+    for name, dtype, shape in new_inputs or []:
+        model.graph.input.append(helper.make_tensor_value_info(name, dtype, shape))
+
+    for name, init_value in (trainable or {}).items():
+        existing = next((vi for vi in model.graph.input if vi.name == name), None)
+        if existing is None:
+            raise ValueError(
+                f"{name!r} is not a graph input; add it via new_inputs first",
+            )
+        dtype = existing.type.tensor_type.elem_type
+        model.graph.initializer.append(
+            numpy_helper.from_array(
+                init_value.astype(onnx.helper.tensor_dtype_to_np_dtype(dtype)),
+                name=name,
+            ),
+        )
+
+    onnx.save(
+        model,
+        str(save_path),
+        save_as_external_data=True,
+        location=data_filename,
+    )
+    return save_path
+
 
 def generate_loss(
     sub_graph_path: Path,
     loss_type: LossType,
+    input_name :str,
+    output_name:str,
     input_shape: list[int] | None,
     output_dtype: int,
     temp_dir: Path | None = None,
-) -> tuple[Path, onnxblock.blocks.Block]:
+) -> tuple[Path, onnxblock.blocks.Block, list[str]]:
+    names = [output_name]
     match loss_type:
         case LossType.MaskedSumLoss:
             assert input_shape is not None
@@ -35,24 +87,53 @@ def generate_loss(
                 output_dtype,
             )
             tag = f"{sub_graph_path.stem}_pullback"
-            loss = MaskedSumLoss(tag, target_path.parent)
+            loss = MaskedSumLoss(target_path.parent)
 
         case LossType.AdversarialLoss_SquaredDiffLoss:
-            target_path = sub_graph_path
-            loss = AdversarialLoss_SquaredDiffLoss()
+            assert input_shape is not None
+            assert temp_dir is not None, (
+                "temp_dir required for AdversarialLoss_SquaredDiffLoss"
+            )
 
-        case LossType.AdversarialLoss_NormalizedSquaredDiffLoss:
-            target_path = sub_graph_path
-            loss = AdversarialLoss_NormalizedSquaredDiffLoss()
+            target_path = _add_loss_inputs(
+                sub_graph_path,
+                temp_dir,
+                "target",
+                new_inputs=[("target", output_dtype, input_shape)],
+            )
 
-        case LossType.AdversarialLoss_EnvelopeDiffLoss:
-            target_path = sub_graph_path
-            loss = AdversarialLoss_EnvelopeDiffLoss()
+            loss = AdversarialLoss_SquaredDiffLoss(target_path.parent)
+            names = ["target"] + names
 
+        case (
+            LossType.AdversarialLoss_NormalizedSquaredDiffLoss
+            | LossType.AdversarialLoss_EnvelopeDiffLoss
+        ):
+            assert input_shape is not None
+            assert temp_dir is not None, "temp_dir required for this loss"
+
+            target_path = _add_loss_inputs(
+                sub_graph_path,
+                temp_dir,
+                "adv_inputs",
+                new_inputs=[
+                    ("x", output_dtype, input_shape),
+                    ("target", output_dtype, input_shape),
+                ],
+                # trainable={input_name: np.zeros(input_shape, dtype=np.float32)},
+            )
+            loss_cls = (
+                AdversarialLoss_NormalizedSquaredDiffLoss
+                if loss_type == LossType.AdversarialLoss_NormalizedSquaredDiffLoss
+                else AdversarialLoss_EnvelopeDiffLoss
+            )
+            loss = loss_cls(target_path.parent)
+            names = ["x","target",input_name] + names
+            
         case _:
             raise ValueError(f"Invalid loss type: {loss_type}")
 
-    return target_path, loss
+    return target_path, loss, names
 
 
 def _jacobian_modification(
@@ -109,24 +190,30 @@ def generate_subgraph_pullback(
     del model_graph
 
     with tempfile.TemporaryDirectory() as tmp:
-        target_path, loss = generate_loss(
+        target_path, loss , output_names= generate_loss(
             base_model_path or sub_graph_path,
             loss_type,
+            input_name,
+            output_name,
             input_shape,
             output_dtype,
             temp_dir=Path(tmp),
         )
+        
 
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
+
         generated_paths = generate_artifacts(
             target_path,
             save_directory=sub_graph_path.parent,
             requires_grad=[input_name],
-            loss_input_names=[output_name],
+            loss_input_names=output_names,
             loss=loss,
             gradient_model_name=f"{prefix}.onnx",
             save_loss_model=False,
+            # optimizer from config
             optimizer_model_name=f"{prefix}_optimizer.onnx",
+            
         )
 
     return generated_paths

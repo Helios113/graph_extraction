@@ -29,9 +29,7 @@ force = False
 ensure_base_model(cfg, force=force, verbose=False)
 
 
-
-
-sub_graphs = ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=True)
+sub_graphs = ensure_subgraphs(cfg, force=force)
 # output = ensure_subgraph_pullback(sub_graphs, force=force)
 # print(output)
 
@@ -39,10 +37,4 @@ sub_graphs = ensure_subgraphs(cfg, force=force, do_not_materialise_subgraphs=Tru
 output = ensure_subgraph_pullback(
     sub_graphs,
     force=force,
-    base_model_path=Path(
-        "/nfs-share/pa511/code_bases/new_jac/onnx_models/qwen_jac_trained_sublayers/base_model.onnx"
-    ),
 )
-print(output)
-
-generate_union_of_subgraphs(output["gradient"])

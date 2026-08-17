@@ -4,7 +4,7 @@
 import logging
 from pathlib import Path
 from enum import Enum
-from construct.onnx_block_utils import set_temp_file_name
+from construct.onnx_block_utils import set_temp_file_names
 import onnx
 
 from onnxruntime.training import onnxblock
@@ -49,7 +49,6 @@ def generate_artifacts(
 
         def build(self, *inputs_to_loss):
             # If loss_input_names is passed, only pass the specified input names to the loss function.
-            print("Inputs to loss at build top", inputs_to_loss)
 
             if self._loss_input_names:
                 inputs_to_loss = self._loss_input_names
@@ -67,10 +66,10 @@ def generate_artifacts(
                     return (*loss_output, *tuple(additional_output_names))
                 else:
                     return (loss_output, *tuple(additional_output_names))
-            print("input to loss", inputs_to_loss)
             return self._loss(*inputs_to_loss)
 
-    gradients_block = set_temp_file_name(_GradientsBlock(loss, loss_input_names), temp_dir=save_directory, temp_file_name="temp_gradient")
+    print("Loss input names",loss_input_names, flush = True)
+    gradients_block = set_temp_file_names(_GradientsBlock(loss, loss_input_names), temp_dir=save_directory, tag="gradient")
    
     if requires_grad is not None and frozen_params is not None and set(requires_grad).intersection(set(frozen_params)):
         raise RuntimeError(
@@ -87,7 +86,7 @@ def generate_artifacts(
             gradients_block.requires_grad(arg, False)
 
     with onnxblock.base(loaded_model, str(model_path)):
-        print("output names", [output.name for output in loaded_model.graph.output])
+        print(*[output.name for output in loaded_model.graph.output], flush=True)
         _ = gradients_block(*[output.name for output in loaded_model.graph.output])
         gradients_model, loss_model = gradients_block.to_model_proto()
         model_params = gradients_block.parameters()

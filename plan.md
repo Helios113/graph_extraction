@@ -36,4 +36,9 @@ Then unify all code for subgraphs and pair jaocibans
 # Best case we can do all the separate subgraphs as it is simple and then assemble the model directly
 
 
+Add some info to the file name of the pullback of a extracted vs base subgraph
+
 BLAS checking
+
+
+
