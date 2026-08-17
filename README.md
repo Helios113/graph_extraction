@@ -2,16 +2,9 @@
 
 1. Get uv: https://docs.astral.sh/uv/getting-started/installation/
 
-2. Build the custom onnxruntime-training wheel for your hardware:
+2. Download the wheel at 
 
-   ```
-   git clone https://github.com/Helios113/onnxruntime
-   ```
-
-   Follow that repo's build instructions to produce an `onnxruntime_training-*.whl`
-   for your CUDA/GPU setup.
-
-3. Point `[tool.uv.sources]` in `pyproject.toml` at your built wheel:
+3. Point `[tool.uv.sources]` in `pyproject.toml` at your wheel:
 
    ```toml
    [tool.uv.sources]
@@ -21,7 +14,7 @@
 4. Install the environment:
 
    ```
-   uv sync
+   uv sync  
    ```
 
 <!--## Commands

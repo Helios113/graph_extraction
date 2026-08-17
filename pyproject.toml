@@ -21,19 +21,6 @@ dependencies = [
     "transformers>=5.14.1",
 ]
 
-
-# onnxruntime-training is built from source (see onnxruntime/training_builds/) against CUDA
-# 12.8 for the H100 (sm_90) -- the PyPI wheel's CUDA EP is linked against CUDA 11 libs that
-# don't exist on this cluster, and PyPI has no CUDA-12 GPU build of onnxruntime-training at
-# all. This local build adds real bf16 CPU/CUDA kernel coverage that PyPI's build lacks.
-#
-# NOT editable: setup.py assumes it only ever runs via build.py's own subprocess invocation
-# (CLI flags for package_name, a sys.path hack expecting onnxruntime/python/ as its own
-# sibling dir, docs/LICENSE/requirements co-located) -- none of which hold under uv's PEP 517
-# editable-build (isolated build env, no argv passthrough by default). Pointing at the wheel
-# instead sidesteps all of that; for a live Python-only edit loop against the onnxruntime
-# worktree without reinstalling, see onnxruntime/training_builds/dev_link.sh instead, which
-# drops a .pth file into this venv's site-packages.
 [tool.uv.sources]
 onnxruntime-training = { path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" }
 
