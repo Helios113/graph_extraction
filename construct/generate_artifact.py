@@ -4,7 +4,7 @@
 import logging
 from pathlib import Path
 from enum import Enum
-
+from tmp_file import set_temp_file_name
 import onnx
 
 from onnxruntime.training import onnxblock
@@ -70,12 +70,12 @@ def generate_artifacts(
             print("input to loss", inputs_to_loss)
             return self._loss(*inputs_to_loss)
 
-    gradients_block = _GradientsBlock(loss, loss_input_names)
-
+    gradients_block = set_temp_file_name(_GradientsBlock(loss, loss_input_names), temp_dir=save_directory, temp_file_name="temp_gradient")
+   
     if requires_grad is not None and frozen_params is not None and set(requires_grad).intersection(set(frozen_params)):
         raise RuntimeError(
             "A parameter cannot be frozen and require gradient computation at the same "
-            f"time {set(requires_grad).intersection(set(frozen_params))}"
+            f"time {set(requires_grad).intersection(set(frozen_params))}",
         )
 
     if requires_grad is not None:

@@ -2,15 +2,7 @@ from pathlib import Path
 
 import onnx
 import onnxruntime.training.onnxblock as onnxblock
-
-
-def _set_temp_file_name(
-    block: onnxblock.blocks.Block, temp_dir: Path, temp_file_name: str
-) -> onnxblock.blocks.Block:
-    block.temp_onnx_file_path = str(temp_dir / temp_file_name)
-    block.temp_external_data_file_name = temp_file_name + ".data"
-    return block
-
+from tmp_file import set_temp_file_name
 
 class MaskedSumLoss(
     onnxblock.blocks.Block,
@@ -19,16 +11,11 @@ class MaskedSumLoss(
 
     def __init__(self, tag: str, temp_dir: Path):
         super().__init__()
-        _set_temp_file_name(self, temp_dir, f"temp_loss_{tag}.onnx")
-        # self._cast = _set_temp_file_name(
-        #     onnxblock.blocks.Cast(onnx.TensorProto.FLOAT),
-        #     temp_dir,
-        #     f"temp_cast_{tag}.onnx",
-        # )
-        self._mul = _set_temp_file_name(
-            onnxblock.blocks.Mul(), temp_dir, f"temp_mul_{tag}.onnx"
+        set_temp_file_name(self, temp_dir, f"temp_loss_{tag}.onnx")
+        self._mul = set_temp_file_name(
+            onnxblock.blocks.Mul(), temp_dir, f"temp_mul_{tag}.onnx",
         )
-        self._reduce_sum = _set_temp_file_name(
+        self._reduce_sum = set_temp_file_name(
             onnxblock.blocks.ReduceSum(keepdims=False),
             temp_dir,
             f"temp_reduce_sum_{tag}.onnx",

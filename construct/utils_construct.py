@@ -15,16 +15,18 @@ from onnx.utils import Extractor
 from PIL.ImImagePlugin import i
 from transformers.models.auto import AutoModelForCausalLM
 from generate_artifact import generate_artifacts
-from config import LossType, ModelConfig, SublayerConfig, grad_names
+from config import LossType, ModelConfig, SublayerConfig
 from loss import (
     MaskedSumLoss,
     AdversarialLoss_EnvelopeDiffLoss,
     AdversarialLoss_SquaredDiffLoss,
     AdversarialLoss_NormalizedSquaredDiffLoss,
 )
-from union_per_pair_artifacts import build_union_artifacts
+import hashlib
 
-
+def _strip_last_quantifier(path:str) -> str:
+    return ".".join(path.split(".")[:-1])
+    
 def _dummy_input(cfg: ModelConfig) -> torch.Tensor:
     if cfg.input_name == "input_ids":
         return torch.randint(0, cfg.vocab_size, (cfg.batch, cfg.seq))
@@ -94,64 +96,6 @@ def chdir(path: Path):
         os.chdir(prev)
 
 
-def _add_layer_norm_stats_outputs(
-    model: onnx.ModelProto,
-) -> onnx.ModelProto:
-    model = onnx.shape_inference.infer_shapes(model)
-    shapes = {
-        vi.name: vi
-        for vi in list(model.graph.value_info)
-        + list(model.graph.input)
-        + list(model.graph.output)
-    }
-    # dtype = _weight_dtype(model)
-
-    for node in model.graph.node:
-        if node.op_type != "LayerNormalization" or len(node.output) > 1:
-            continue
-        x_vi = shapes.get(node.input[0])
-        if x_vi is None or not x_vi.type.tensor_type.HasField("shape"):
-            raise RuntimeError(
-                f"No static shape for {node.input[0]!r} feeding {node.name}",
-            )
-        x_shape = [d.dim_value for d in x_vi.type.tensor_type.shape.dim]
-        axis = next((a.i for a in node.attribute if a.name == "axis"), -1)
-        if axis < 0:
-            axis += len(x_shape)
-        stats_shape = x_shape[:axis] + [1] * (len(x_shape) - axis)
-
-        mean_name, invstd_name = node.name + "_Mean", node.name + "_InvStdDev"
-        node.output.extend([mean_name, invstd_name])
-        for out_name in (mean_name, invstd_name):
-            model.graph.value_info.append(
-                helper.make_tensor_value_info(out_name, dtype, stats_shape),
-            )
-
-    return model
-
-
-def _add_layer_value_outputs(
-    model: onnx.ModelProto,
-    layer_names: list[str],
-    cfg: ModelConfig,
-) -> onnx.ModelProto:
-    """Expose each severed layer's own activations as a graph output (not just its
-    gradient), so callers can read e.g. `add_1` alongside `add_1_grad`. generate_artifacts
-    keeps the full forward pass regardless of which slice has requires_grad, so every layer
-    name is already a node output in every per-pair graph -- it just isn't declared yet.
-    """
-    existing = {o.name for o in model.graph.output}
-    dtype = _weight_dtype(model)
-    for name in layer_names:
-        if name not in existing:
-            model.graph.output.append(
-                helper.make_tensor_value_info(
-                    name,
-                    dtype,
-                    [cfg.batch, cfg.seq, cfg.d_model],
-                ),
-            )
-    return model
 
 
 def export_base_model(
@@ -244,11 +188,6 @@ def ensure_base_model(
         else:
             export_base_model(cfg, verbose)
             print(f"Base model exported -> {cfg.base_model_path}")
-            if cfg.needs_layernorm_patch:
-                model = onnx.load(str(cfg.base_model_path), load_external_data=False)
-                model = _add_layer_norm_stats_outputs(model)
-                onnx.save(model, str(cfg.base_model_path))
-                print(f"LayerNorm stats outputs added -> {cfg.base_model_path}")
 
 
 def ensure_subgraphs(
@@ -262,7 +201,7 @@ def ensure_subgraphs(
     paths = [
         (
             cfg.sub_block_path
-            / f"sublayer{cnt}_{sublayer_conf.input}_{sublayer_conf.output}_subgraph_forward.onnx",
+            / f"{sublayer_conf.input}.{sublayer_conf.output}.subgraph.forward.onnx",
             sublayer_conf,
         )
         for cnt, sublayer_conf in enumerate(cfg.sublayers)
@@ -294,7 +233,7 @@ def ensure_subgraph_pullback(
     generated_paths = {}
 
     for path, sublayer_conf in paths:
-        pullback_path = path.with_name(path.stem + "_pullback.onnx")
+        pullback_path = path.with_name(_strip_last_quantifier(path.stem) + ".pullback.onnx")
         lock_path = path.with_name(pullback_path.name + ".lock")
         with exclusive_lock(lock_path):
             if not pullback_path.exists() or force:
@@ -399,7 +338,7 @@ def generate_subgraph_pullback(
     # ONNX Save removes base_dir info so when saving multiple tensors, we end up with errors
     # Using the absolute path remedies this directly.
     sub_graph_path = sub_graph_path.resolve()
-    tag = "_pullback"
+    tag = ".pullback"
 
     # get the dtype of the output.
     # we load the model
@@ -420,7 +359,7 @@ def generate_subgraph_pullback(
             temp_dir=Path(tmp),
         )
 
-        prefix = sub_graph_path.stem + tag
+        prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
         generated_paths = generate_artifacts(
             target_path,
             save_directory=sub_graph_path.parent,
@@ -438,7 +377,9 @@ def generate_subgraph_pullback(
 def generate_union_of_subgraphs(
     paths: list[Path],
 ):
-
+    merged_path = "-".join([".".join(path.stem.split(".")[0:2]) for path in paths])
+    hash = hashlib.md5(string=merged_path.encode("utf-8")).hexdigest()[:8]
+    final_name =  "-".join([".".join(path.stem.split(".")[0:2]) for path in [paths[0], paths[-1]]])+"_"+hash
     base = onnx.load(paths[0])
     merged_graph = onnx.GraphProto()
     merged_graph.CopyFrom(base.graph)
@@ -492,8 +433,10 @@ def generate_union_of_subgraphs(
     merged_model = onnx.ModelProto()
     merged_model.CopyFrom(base)
     merged_model.graph.CopyFrom(merged_graph)
+    
+    
 
-    save_path = paths[0].with_name(paths[0].stem + "_union.onnx")
+    save_path = paths[0].with_name(final_name + ".union.onnx")
     location = os.path.basename(save_path) + ".data"
     onnx.save(
         merged_model,
