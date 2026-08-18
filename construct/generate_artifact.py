@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from enum import Enum
 from construct.onnx_block_utils import set_temp_file_names
+from construct.gradient_block import GradientBlock
+
 import onnx
 
 from onnxruntime.training import onnxblock
@@ -41,9 +43,9 @@ def generate_artifacts(
         loss = onnxblock.blocks.PassThrough()
         logging.info("No loss block provided. Loss node will not be added to the graph.")
 
-    class _GradientsBlock(onnxblock.TrainingBlock):
-        def __init__(self, _loss, _loss_input_names=None):
-            super().__init__()
+    class _GradientsBlock(GradientBlock):
+        def __init__(self, _loss, _loss_input_names=None, accumulate_gradients=False):
+            super().__init__(accumulate_gradients=accumulate_gradients)
             self._loss = _loss
             self._loss_input_names = _loss_input_names
 

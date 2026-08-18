@@ -161,6 +161,25 @@ def _jacobian_modification(
         location=data_filename,
     )
     return save_path
+def find_output_node(model_graph, output_name):
+    """Search value_info, output, and input for a ValueInfoProto matching
+    output_name. Returns the ValueInfoProto (has .name and .type.tensor_type).
+    Initializers are excluded — TensorProto has no .type field, so it can't
+    be returned as a compatible object; see note below if you need those too.
+    """
+    all_value_info = (
+        list(model_graph.graph.value_info)
+        + list(model_graph.graph.output)
+        + list(model_graph.graph.input)
+    )
+
+    try:
+        return next(vi for vi in all_value_info if vi.name == output_name)
+    except StopIteration:
+        available = [vi.name for vi in all_value_info]
+        raise ValueError(f"'{output_name}' not found. Available: {available}")
+
+
 
 
 def generate_subgraph_pullback(
@@ -183,9 +202,7 @@ def generate_subgraph_pullback(
     # we load the model
     model_graph = onnx.load(base_model_path or sub_graph_path, load_external_data=False)
     # get the node called output_name
-    output_node = next(
-        vi for vi in model_graph.graph.value_info if vi.name == output_name
-    )
+    output_node = find_output_node(model_graph, output_name)
     output_dtype = output_node.type.tensor_type.elem_type
     del model_graph
 
