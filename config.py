@@ -1,17 +1,31 @@
-from construct.loss import AdversarialLoss_SquaredDiffLoss, AdversarialLoss_NormalizedSquaredDiffLoss, AdversarialLoss_EnvelopeDiffLoss
+from construct.loss import (
+    AdversarialLoss_SquaredDiffLoss,
+    AdversarialLoss_NormalizedSquaredDiffLoss,
+    AdversarialLoss_EnvelopeDiffLoss,
+)
 
 import enum
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
 ONNX_DIR = Path("onnx_models")
 
 from enum import Enum
+
+
 class LossType(Enum):
     MaskedSumLoss = "MaskedSumLoss"
     AdversarialLoss_SquaredDiffLoss = "AdversarialLoss_SquaredDiffLoss"
-    AdversarialLoss_NormalizedSquaredDiffLoss = "AdversarialLoss_NormalizedSquaredDiffLoss"
+    AdversarialLoss_NormalizedSquaredDiffLoss = (
+        "AdversarialLoss_NormalizedSquaredDiffLoss"
+    )
     AdversarialLoss_EnvelopeDiffLoss = "AdversarialLoss_EnvelopeDiffLoss"
+
+
+class OptimizerType(Enum):
+    SGD = "SGD"
+    AdamW = "AdamW"
 
 
 @dataclass
@@ -28,9 +42,13 @@ class InputSourceConfig:
 
     def __post_init__(self):
         if self.mode not in ("random", "dataset", "fixed_norm", "characteristic"):
-            raise ValueError(f"input_source.mode must be 'random', 'dataset', or 'fixed_norm', got {self.mode!r}")
+            raise ValueError(
+                f"input_source.mode must be 'random', 'dataset', or 'fixed_norm', got {self.mode!r}"
+            )
         if self.mode == "dataset" and (self.tokenizer is None or self.dataset is None):
-            raise ValueError("input_source.mode = 'dataset' requires 'tokenizer' and 'dataset'")
+            raise ValueError(
+                "input_source.mode = 'dataset' requires 'tokenizer' and 'dataset'"
+            )
         if self.mode == "fixed_norm" and self.norm is None:
             raise ValueError("input_source.mode = 'fixed_norm' requires 'norm'")
 
@@ -41,13 +59,23 @@ class SublayerConfig:
     input_shape: list[int]
     output: str
     input: str
+    optimizer_type: OptimizerType | None = None
+    
 
     def __post_init__(self):
-            if isinstance(self.loss_type, str):
-                self.loss_type = LossType(self.loss_type)
+        if isinstance(self.loss_type, str):
+            self.loss_type = LossType(self.loss_type)
+        if isinstance(self.optimizer_type, str):
+            self.optimizer_type = OptimizerType(self.optimizer_type)
 
 
-PIPELINES = ("jacobians", "activations", "collisions", "collision_opt", "sublayer_jacobians")
+PIPELINES = (
+    "jacobians",
+    "activations",
+    "collisions",
+    "collision_opt",
+    "sublayer_jacobians",
+)
 
 
 @dataclass
@@ -135,17 +163,29 @@ class ModelConfig:
 
     def __post_init__(self):
         if self.pipeline not in PIPELINES:
-            raise ValueError(f"{self.name}: pipeline must be one of {PIPELINES}, got {self.pipeline!r}")
-        if self.jacobian_position is not None and not (-self.seq <= self.jacobian_position < self.seq):
-            raise ValueError(f"{self.name}: jacobian_position {self.jacobian_position} out of range for seq={self.seq}")
+            raise ValueError(
+                f"{self.name}: pipeline must be one of {PIPELINES}, got {self.pipeline!r}"
+            )
+        if self.jacobian_position is not None and not (
+            -self.seq <= self.jacobian_position < self.seq
+        ):
+            raise ValueError(
+                f"{self.name}: jacobian_position {self.jacobian_position} out of range for seq={self.seq}"
+            )
         if self.slogdet_only and self.samples is None:
             raise ValueError(f"{self.name}: slogdet_only requires samples to be set")
         if self.collision_opt_optimizer not in ("adam", "sgd"):
-            raise ValueError(f"{self.name}: collision_opt_optimizer must be 'adam' or 'sgd', got {self.collision_opt_optimizer!r}")
+            raise ValueError(
+                f"{self.name}: collision_opt_optimizer must be 'adam' or 'sgd', got {self.collision_opt_optimizer!r}"
+            )
         if not (-self.seq <= self.collision_opt_position < self.seq):
-            raise ValueError(f"{self.name}: collision_opt_position {self.collision_opt_position} out of range for seq={self.seq}")
+            raise ValueError(
+                f"{self.name}: collision_opt_position {self.collision_opt_position} out of range for seq={self.seq}"
+            )
         if self.collision_opt_loss not in ("plain", "normalized"):
-            raise ValueError(f"{self.name}: collision_opt_loss must be 'plain' or 'normalized', got {self.collision_opt_loss!r}")
+            raise ValueError(
+                f"{self.name}: collision_opt_loss must be 'plain' or 'normalized', got {self.collision_opt_loss!r}"
+            )
 
     @property
     def pairs(self) -> list[tuple[str, str]]:

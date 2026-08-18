@@ -27,10 +27,13 @@ def ensure_base_model(
 
 
 def ensure_subgraphs(
-    cfg: ModelConfig, force: bool = False, do_not_materialise_subgraphs: bool = False,
+    cfg: ModelConfig,
+    force: bool = False,
+    do_not_materialise_subgraphs: bool = False,
 ) -> list[tuple[Path, SublayerConfig]]:
-    """Extracts cfg.per_pair_dir's subgraphs if they don't already all exist (or always, if
-    force), guarded by a lockfile."""
+    """Extract subgraphs from base model,
+    do_not_materialise_subgraphs is set true, the subgraphs are not materialised as onnx files but kept logically. This is used to generate a jacobians insitu
+    """
 
     cfg.sub_block_path.mkdir(parents=True, exist_ok=True)
 
@@ -66,10 +69,16 @@ def ensure_subgraph_pullback(
     force: bool = False,
     base_model_path: Path | None = None,
 ) -> dict[str, list[Path]]:
+    """
+    base_model_path -- if we want to extract jacobians from a subgraph without materialising it
+    """
+    
     generated_paths = {}
 
     for path, sublayer_conf in paths:
-        pullback_path = path.with_name(_strip_last_quantifier(path.stem) + ".pullback.onnx")
+        pullback_path = path.with_name(
+            _strip_last_quantifier(path.stem) + ".pullback.onnx"
+        )
         lock_path = path.with_name(pullback_path.name + ".lock")
         with exclusive_lock(lock_path):
             if not pullback_path.exists() or force:
@@ -80,6 +89,7 @@ def ensure_subgraph_pullback(
                     sublayer_conf.input,
                     sublayer_conf.output,
                     base_model_path=base_model_path,
+                    optimizer_type=sublayer_conf.optimizer_type,
                 )
                 for k, v in res.items():
                     generated_paths.setdefault(k, []).append(v)

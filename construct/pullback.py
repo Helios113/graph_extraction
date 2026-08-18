@@ -3,9 +3,12 @@ from pathlib import Path
 
 import onnx
 import onnxruntime.training.onnxblock as onnxblock
+from onnxruntime.training.onnxblock.optim import SGD,AdamW
+
 from onnx import helper
 
-from config import LossType
+from config import LossType, OptimizerType
+
 from construct.fs_utils import _strip_last_quantifier
 from construct.generate_artifact import generate_artifacts
 from construct.loss import (
@@ -180,8 +183,6 @@ def find_output_node(model_graph, output_name):
         raise ValueError(f"'{output_name}' not found. Available: {available}")
 
 
-
-
 def generate_subgraph_pullback(
     sub_graph_path: Path,
     loss_type: LossType,
@@ -189,6 +190,7 @@ def generate_subgraph_pullback(
     input_name: str,
     output_name: str,
     base_model_path: Path | None = None,
+    optimizer_type:  OptimizerType| None = None,
 ) -> dict[str, Path]:
     # This will always override -- make sure file protection is elsewhere
 
@@ -216,8 +218,7 @@ def generate_subgraph_pullback(
             output_dtype,
             temp_dir=Path(tmp),
         )
-        
-
+    
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
 
         generated_paths = generate_artifacts(
@@ -228,7 +229,7 @@ def generate_subgraph_pullback(
             loss=loss,
             gradient_model_name=f"{prefix}.onnx",
             save_loss_model=False,
-            # optimizer from config
+            optimizer = optimizer_type,
             optimizer_model_name=f"{prefix}_optimizer.onnx",
             
         )
