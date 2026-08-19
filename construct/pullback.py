@@ -131,8 +131,8 @@ def generate_loss(
                 else AdversarialLoss_EnvelopeDiffLoss
             )
             loss = loss_cls(target_path.parent)
-            names = ["x","target",input_name] + names
-            
+            names = ["x", input_name, "target"] + names
+
         case _:
             raise ValueError(f"Invalid loss type: {loss_type}")
 

@@ -1,16 +1,10 @@
 name = "qwen_jac_trained_sublayers"
-pipeline = "sublayer_jacobians"
 model = "Qwen/Qwen2.5-0.5B"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
 input_name = "input_ids"
 vocab_size = 151646
-batch = 32                   # 14336 (8*896) Jacobian elements chunked in batches of this size; also
-                               # evenly divides d_model=896 for jacobian_position-restricted (single-token) runs
+batch = 32                   
 seq = 8
 d_model = 896
-needs_layernorm_patch = false
-samples = 20
-save_dir = "qwen_jac_sing"
-slogdet_only = true
 
 [input_source]
 mode = "fixed_norm"
@@ -18,14 +12,11 @@ norm = 10
 norm_spread = 1e-3
 
 
-# [[sublayers]]
-# input = "embedding"
-# output = "add_6"
-
 
 [[sublayers]]
-
 input = "add_6"
 output = "add_8"
-loss_type = "AdversarialLoss_NormalizedSquaredDiffLoss"
+loss_type = "AdversarialLoss_EnvelopeDiffLoss"
+# loss_type = "AdversarialLoss_NormalizedSquaredDiffLoss"
+# loss_type = "AdversarialLoss_SquaredDiffLoss"
 input_shape = [32, 8, 896]

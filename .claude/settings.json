@@ -1,8 +1,15 @@
 {
   "permissions": {
+    "allow": [
+      "Edit(/nfs-share/pa511/code_bases/new_jac/execute/**)",
+      "Write(/nfs-share/pa511/code_bases/new_jac/execute/**)",
+      "Edit(/nfs-share/pa511/code_bases/new_jac/lapac/**)",
+      "Write(/nfs-share/pa511/code_bases/new_jac/lapac/**)"
+
+    ],
     "deny": [
-      "Edit(**/*.py)",
-      "Write(**/*.py)"
+      "Edit(*)",
+      "Write(*)"
     ]
   }
 }
