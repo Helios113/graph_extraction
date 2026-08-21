@@ -8,9 +8,9 @@ from construct.construct import (
 )
 import ml_dtypes
 
-from execute.optimization_loop import optimization_loop, NewtonRaphson
+from execute.jacobian import compute_jacobian
 import numpy as np
-cfg = load_config("configs/qwen_adversarial_sublayer.toml")
+cfg = load_config("configs/qwen_jac_sublayer.toml")
 # assert cfg.pipeline == "collision_opt", f"{cfg.name}: expected pipeline = \"collision_opt\", got {cfg.pipeline!r}"
 force = False
 
@@ -49,8 +49,8 @@ input_names = [i for i in input_names]
 # feed = {}
 
 # where input_data is your numpy array
-x = np.random.rand(32, 8, 896).astype(ml_dtypes.bfloat16)
-y0 = np.random.rand(32, 8, 896).astype(ml_dtypes.bfloat16)
+x = np.tile(np.random.rand(1, 8, 896).astype(ml_dtypes.bfloat16), [32,1,1])
+print(x.shape)
 
 
 out = out_sess.run(
@@ -58,19 +58,17 @@ out = out_sess.run(
         )
 print(out)
 # # Define gradient session
-grad_sess = ort.InferenceSession(str(graph_path),sess_options=sess_options, providers=["CUDAExecutionProvider"])
+jac_sess = ort.InferenceSession(str(graph_path),sess_options=sess_options, providers=["CUDAExecutionProvider"])
 
-optim = NewtonRaphson(1e-10, dtype=ml_dtypes.bfloat16)
+jacobian = compute_jacobian(
+            jac_sess,
+            input_data=x,
+            input_name="add_6",
+            mask_name="mask",
+            gradient_output_name="add_6_grad",
+            output_shape=[32, 8, 896],
+            mode="diagonal",
+        )
 
 
-y_final, loss_history = optimization_loop(
-    grad_sess,
-    x = x,
-    target=out[0],
-    y0=y0,
-    input_name="add_6",
-    steps=1000,
-    optimizer=optim,
-)
-
-print(loss_history)
+print(jacobian.shape)
