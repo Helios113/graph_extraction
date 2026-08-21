@@ -68,12 +68,12 @@ def ensure_subgraph_pullback(
     paths: list[tuple[Path, SublayerConfig]],
     force: bool = False,
     base_model_path: Path | None = None,
-) -> dict[str, list[Path]]:
+) -> list[Path]:
     """
     base_model_path -- if we want to extract jacobians from a subgraph without materialising it
     """
     
-    generated_paths = {}
+    generated_paths = []
 
     for path, sublayer_conf in paths:
         pullback_path = path.with_name(
@@ -91,11 +91,11 @@ def ensure_subgraph_pullback(
                     base_model_path=base_model_path,
                     optimizer_type=sublayer_conf.optimizer_type,
                 )
-                for k, v in res.items():
-                    generated_paths.setdefault(k, []).append(v)
-                print(f"Extracted subgraph -> {path}")
+                generated_paths.append(res)
             else:
-                generated_paths.setdefault("gradient", []).append(pullback_path)
+                # generated_paths.setdefault("gradient", []).append(pullback_path)
+                generated_paths.append(pullback_path)
+                
                 print(f"Subgraph pullbac already exist, skipping extraction -> {path}")
                 print(
                     f"Subgraph pullbac already exist, have not checked for optimizer -> {path}",

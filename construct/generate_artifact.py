@@ -26,7 +26,7 @@ def generate_artifacts(
     save_loss_model: bool = False,
     additional_output_names: list[str] | None = None,
     loss_input_names: list[str] | None = None,
-) -> dict[str, Path]:
+) -> Path:
 
     loaded_model = onnx.load(model_path)
 
@@ -63,7 +63,6 @@ def generate_artifacts(
                     return (loss_output, *tuple(additional_output_names))
             return self._loss(*inputs_to_loss)
 
-    print("Loss input names", loss_input_names, flush=True)
     gradients_block = set_temp_file_names(
         _GradientsBlock(
             loss,
@@ -93,7 +92,6 @@ def generate_artifacts(
             gradients_block.requires_grad(arg, False)
 
     with onnxblock.base(loaded_model, str(model_path)):
-        print(*[output.name for output in loaded_model.graph.output], flush=True)
         _ = gradients_block(*[output.name for output in loaded_model.graph.output])
         gradients_model, loss_model = gradients_block.to_model_proto()
         model_params = gradients_block.parameters()
@@ -116,54 +114,54 @@ def generate_artifacts(
         gradients_model, gradient_model_path, f"{gradient_model_name}.data"
     )
     onnx.checker.check_model(gradient_model_path)
-
+    return gradient_model_path
     return_dict = {"gradient": gradient_model_path}
 
-    logging.info("Saved gradients model to %s", gradient_model_path)
+    # logging.info("Saved gradients model to %s", gradient_model_path)
 
-    if save_loss_model:
-        loss_model_path = save_directory / loss_model_name
-        if loss_model_path.exists():
-            logging.info(
-                "loss model path %s already exists. Overwriting.", loss_model_path
-            )
-        _save_with_data_file(loss_model, loss_model_path, f"{loss_model_name}.data")
-        onnx.checker.check_model(loss_model_path)
+    # if save_loss_model:
+    #     loss_model_path = save_directory / loss_model_name
+    #     if loss_model_path.exists():
+    #         logging.info(
+    #             "loss model path %s already exists. Overwriting.", loss_model_path
+    #         )
+    #     _save_with_data_file(loss_model, loss_model_path, f"{loss_model_name}.data")
+    #     onnx.checker.check_model(loss_model_path)
 
-        logging.info("Saved loss model to %s", loss_model_path)
-        return_dict["loss"] = loss_model_path
+    #     logging.info("Saved loss model to %s", loss_model_path)
+    #     return_dict["loss"] = loss_model_path
 
-    else:
-        logging.info("save_loss_model is False. Skipping loss model generation.")
+    # else:
+    #     logging.info("save_loss_model is False. Skipping loss model generation.")
 
-    # If optimizer is not specified, skip creating the optimizer model
-    if optimizer is None:
-        logging.info("No optimizer enum provided. Skipping optimizer model generation.")
-        return return_dict
+    # # If optimizer is not specified, skip creating the optimizer model
+    # if optimizer is None:
+    #     logging.info("No optimizer enum provided. Skipping optimizer model generation.")
+    #     return return_dict
 
-    opset_version = None
-    for domain in loaded_model.opset_import:
-        if domain.domain == "" or domain.domain == "ai.onnx":
-            opset_version = domain.version
-            break
-    optim_dict = {
-        "SGD": SGD,
-        "AdamW": AdamW,
-    }
-    optim_block = optim_dict[optimizer.value]()
-    with onnxblock.empty_base(opset_version=opset_version):
-        _ = optim_block(model_params)
-        optim_model = optim_block.to_model_proto()
+    # opset_version = None
+    # for domain in loaded_model.opset_import:
+    #     if domain.domain == "" or domain.domain == "ai.onnx":
+    #         opset_version = domain.version
+    #         break
+    # optim_dict = {
+    #     "SGD": SGD,
+    #     "AdamW": AdamW,
+    # }
+    # optim_block = optim_dict[optimizer.value]()
+    # with onnxblock.empty_base(opset_version=opset_version):
+    #     _ = optim_block(model_params)
+    #     optim_model = optim_block.to_model_proto()
 
-    optimizer_model_path = save_directory / optimizer_model_name
-    _save_with_data_file(
-        optim_model,
-        optimizer_model_path,
-        f"{optimizer_model_name}.data",
-    )
-    onnx.checker.check_model(optimizer_model_path)
+    # optimizer_model_path = save_directory / optimizer_model_name
+    # _save_with_data_file(
+    #     optim_model,
+    #     optimizer_model_path,
+    #     f"{optimizer_model_name}.data",
+    # )
+    # onnx.checker.check_model(optimizer_model_path)
 
-    logging.info("Saved optimizer model to %s", optimizer_model_path)
-    return_dict["optimizer"] = optimizer_model_path
+    # logging.info("Saved optimizer model to %s", optimizer_model_path)
+    # return_dict["optimizer"] = optimizer_model_path
 
-    return return_dict
+    # return return_dict

@@ -191,7 +191,7 @@ def generate_subgraph_pullback(
     output_name: str,
     base_model_path: Path | None = None,
     optimizer_type:  OptimizerType| None = None,
-) -> dict[str, Path]:
+) -> Path:
     # This will always override -- make sure file protection is elsewhere
 
     """Builds one sublayer's own independent gradient graph"""
@@ -221,7 +221,7 @@ def generate_subgraph_pullback(
     
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
 
-        generated_paths = generate_artifacts(
+        generated_path = generate_artifacts(
             target_path,
             save_directory=sub_graph_path.parent,
             requires_grad=[input_name],
@@ -234,4 +234,4 @@ def generate_subgraph_pullback(
             
         )
 
-    return generated_paths
+    return generated_path

@@ -24,7 +24,6 @@ from execute.jacobian import compute_jacobian
 
 
 
-
 def find_jacobians(
     sub_graphs: list[Path],
     mode: str = "diagonal",
@@ -37,8 +36,6 @@ def find_jacobians(
     jacobians: dict[str, np.ndarray] = {}
 
     for path in sub_graphs:
-
-        session = ort.InferenceSession(str(path))
 
         jacobian = compute_jacobian(
             session,
