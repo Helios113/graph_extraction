@@ -1,61 +1,96 @@
 import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from config import InputSourceConfig  # add to imports at top
 
-
-def get_token_ids(
-    dataset: str,
-    tokenizer: str,
-    text_column: str = "text",
-    split: str = "train",
-    dataset_config: str | None = None,
-) -> list[list[int]]:
-    """Load a HF dataset and tokenize its text column with a HF tokenizer.
-
-    Returns one list of token ids per example (unpadded, no special handling
-    of length -- callers assemble these into batches/tensors as needed).
-    """
-    ds = load_dataset(dataset, dataset_config, split=split)
-    tok = AutoTokenizer.from_pretrained(tokenizer)
-    return [tok.encode(example[text_column]) for example in ds]
 
 
 def sample_ambient_points(
-    n_points: int,
+    batch: int,
+    seq:int,
     dim: int,
-    mean: np.ndarray | float = 0.0,
-    std: float = 1.0,
+    low: np.ndarray | float = 0.0,
+    high: np.ndarray | float = 1.0,
     seed: int | None = None,
 ) -> np.ndarray:
-    """Draw n_points i.i.d. Gaussian points in R^dim with the given mean and std.
+    """Draw n_points i.i.d.
 
-    `mean` may be a scalar (broadcast to every coordinate) or a (dim,) vector,
-    so callers can place the distribution away from the origin.
+    points uniformly distributed in [low, high)^dim.
+
+    `low` and `high` can each be a scalar or a (dim,) vector.
     """
     rng = np.random.default_rng(seed)
-    mean = np.broadcast_to(mean, (dim,))
-    return mean + std * rng.standard_normal((n_points, dim))
+    return rng.uniform(low=low, high=high, size=(batch,seq, dim))
 
-
-def sample_around_point(
-    point: np.ndarray,
+def sample_around_points(
+    points: np.ndarray,
     n_samples: int,
     min_radius: float = 0.0,
     max_radius: float = 1.0,
     seed: int | None = None,
 ) -> np.ndarray:
-    """Sample n_samples points uniformly in the shell min_radius <= ||x - point|| <= max_radius.
-
-    Direction is uniform on the unit sphere; radius is drawn so that points
-    are uniform by volume within the shell (not biased toward the center).
-    """
     rng = np.random.default_rng(seed)
-    dim = point.shape[-1]
 
-    directions = rng.standard_normal((n_samples, dim))
+    batch, seq, dim = points.shape
+
+    directions = rng.standard_normal((n_samples, batch, seq, dim))
     directions /= np.linalg.norm(directions, axis=-1, keepdims=True)
 
-    u = rng.uniform(0.0, 1.0, size=n_samples)
-    radii = (min_radius**dim + u * (max_radius**dim - min_radius**dim)) ** (1.0 / dim)
+    u = rng.uniform(0.0, 1.0, size=(n_samples, batch, seq, 1))
+    radii = (min_radius**dim + u * (max_radius**dim - min_radius**dim)) ** (
+        1.0 / dim
+    )
 
-    return point + directions * radii[:, None]
+    perturbed = points[None, ...] + directions * radii
+    print(perturbed.shape)
+
+    return perturbed
+
+def repeat_points_to_match(points: np.ndarray, n_samples: int) -> np.ndarray:
+    """Duplicate input points along a new sample dimension to match the shape
+
+    of the perturbed points output by `sample_around_points`.
+
+    Parameters:
+    -----------
+    points : np.ndarray
+        Array of shape (dim,) or (n_points, dim).
+    n_samples : int
+        Number of repetitions per point.
+
+    Returns:
+    --------
+    np.ndarray
+        - Shape (n_samples, dim) if `points` was 1D (dim,).
+        - Shape (n_points, n_samples, dim) if `points` was 2D (n_points, dim).
+    """
+    points_arr = np.asarray(points)
+    is_1d = points_arr.ndim == 1
+
+    if is_1d:
+        return np.repeat(points_arr[None, :], repeats=n_samples, axis=0)
+
+    # For 2D inputs, expand to (n_points, 1, dim) then broadcast/repeat along axis 1
+    return np.repeat(points_arr[:, None, :], repeats=n_samples, axis=1)
+
+def get_token_ids_array(
+    input_source: InputSourceConfig,
+    seq_len: int,
+) -> np.ndarray:
+
+    ds = load_dataset(input_source.dataset, input_source.dataset_config, split=input_source.split)
+    tok = AutoTokenizer.from_pretrained(input_source.tokenizer)
+
+    rows: list[list[int]] = []
+    for example in ds:
+        if len(rows) >= input_source.data_batch_size:
+            break
+        encoded = tok.encode(example[input_source.text_column])
+        if len(encoded) < seq_len:
+            continue
+        rows.append(encoded[:seq_len])
+
+    if len(rows) < input_source.data_batch_size:
+        raise ValueError(f"dataset only yielded {len(rows)} examples with >= {seq_len} tokens, need {batch}")
+
+    return np.asarray(rows, dtype=np.int64)

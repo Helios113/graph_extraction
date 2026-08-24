@@ -2,7 +2,7 @@ from typing import Protocol
 
 import numpy as np
 import onnxruntime as ort
-
+import tqdm
 
 class Optimizer(Protocol):
     """An update rule for optimization_loop: given the current iterate and the
@@ -133,31 +133,39 @@ def optimization_loop(
     input_name: str,
     steps: int,
     optimizer: Optimizer,
-) -> tuple[np.ndarray, list[float]]:
+) -> tuple[np.ndarray, np.ndarray]:
    
-    y = y0.copy()
-    loss_history = []
+    print(x.shape)
+    print(target.shape)
+    print(y0.shape)
+    
+    # Just iterate over y and then no need to copy the x and target
+    loss_history = np.zeros((steps, *y0.shape[:-1]))
+    y_n = np.zeros_like(y0)
+    for i in range(y0.shape[0]):
+        y = y0[i].copy()
 
-    grad_output_name = f"{input_name}_grad"
-    session_output_names = {o.name for o in gradient_session.get_outputs()}
-    if grad_output_name not in session_output_names:
-        raise ValueError(
-            f"{grad_output_name!r} not found in gradient_session outputs: "
-            f"{sorted(session_output_names)}",
+        grad_output_name = f"{input_name}_grad"
+        session_output_names = {o.name for o in gradient_session.get_outputs()}
+        if grad_output_name not in session_output_names:
+            raise ValueError(
+                f"{grad_output_name!r} not found in gradient_session outputs: "
+                f"{sorted(session_output_names)}",
+            )
+        loss_output_name = next(
+            name for name in session_output_names if name != grad_output_name
         )
-    loss_output_name = next(
-        name for name in session_output_names if name != grad_output_name
-    )
 
-    session_input_names = {i.name for i in gradient_session.get_inputs()}
+        session_input_names = {i.name for i in gradient_session.get_inputs()}
 
-    for _ in range(steps):
-        feed = {input_name: y, "target": target,"x": x}
-        loss_val, grad_y = gradient_session.run(
-            [loss_output_name, grad_output_name], feed,
-        )
-        loss_history.append(float(loss_val))
+        for s in tqdm.tqdm(range(steps)):
+            feed = {input_name: y, "target": target,"x": x}
+            loss_val, grad_y = gradient_session.run(
+                [loss_output_name, grad_output_name], feed,
+            )
 
-        y = optimizer.step(y, grad_y)
-
-    return y, loss_history
+            loss_history[s, i] = loss_val
+            y = optimizer.step(y, grad_y)
+        y_n[i] = y
+        print(loss_history[:,i,:,:].mean())
+    return y_n, loss_history

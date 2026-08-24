@@ -24,27 +24,12 @@ class OptimizerType(Enum):
 
 @dataclass
 class InputSourceConfig:
-    mode: str = "random"
     tokenizer: str | None = None
     dataset: str | None = None
     dataset_config: str | None = None
     split: str = "train"
     text_column: str = "text"
-    norm: float | None = None
-    norm_spread: float | None = None
-    perturbation_spread: float | None = None
-
-    def __post_init__(self):
-        if self.mode not in ("random", "dataset", "fixed_norm", "characteristic"):
-            raise ValueError(
-                f"input_source.mode must be 'random', 'dataset', or 'fixed_norm', got {self.mode!r}"
-            )
-        if self.mode == "dataset" and (self.tokenizer is None or self.dataset is None):
-            raise ValueError(
-                "input_source.mode = 'dataset' requires 'tokenizer' and 'dataset'"
-            )
-        if self.mode == "fixed_norm" and self.norm is None:
-            raise ValueError("input_source.mode = 'fixed_norm' requires 'norm'")
+    data_batch_size: int = 32 # the numbe of sequence lengths
 
 
 @dataclass

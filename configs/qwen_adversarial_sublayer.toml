@@ -7,9 +7,6 @@ seq = 8
 d_model = 896
 
 [input_source]
-mode = "fixed_norm"
-norm = 10
-norm_spread = 1e-3
 
 
 

@@ -7,10 +7,11 @@ seq = 8
 d_model = 896
 
 [input_source]
-mode = "fixed_norm"
-norm = 10
-norm_spread = 1e-3
-
+tokenizer = "Qwen/Qwen2.5-0.5B"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
 
 
 [[sublayers]]

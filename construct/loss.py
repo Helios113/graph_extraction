@@ -2,7 +2,46 @@ from pathlib import Path
 
 import onnxruntime.training.onnxblock as onnxblock
 from construct.onnx_block_utils import set_temp_file_names
+import numpy as np
+import onnx
+from onnxruntime.training.onnxblock import _graph_utils
 
+
+class ReduceSum(onnxblock.blocks._UnaryOp):
+    """ReduceSum node with an explicit axes input (opset 13+), so specific
+    axes (e.g. the trailing feature dim) can be reduced while other dims
+    (e.g. batch, sequence) are preserved."""
+
+    def __init__(self, axes=None, keepdims=True, noop_with_empty_axes=False):
+        super().__init__(
+            "ReduceSum", keepdims=keepdims, noop_with_empty_axes=noop_with_empty_axes
+        )
+        self._axes = axes
+
+    def build(self, input_name):
+        if self._axes is None:
+            return super().build(input_name)
+
+        onnx_model = self.base
+
+        axes_name = _graph_utils.generate_graph_name("reduce_sum_axes")
+        onnx_model.graph.initializer.append(
+            onnx.numpy_helper.from_array(
+                np.array(self._axes, dtype=np.int64), axes_name
+            )
+        )
+
+        node_output_name = _graph_utils.generate_graph_name(f"{self._op_name.lower()}_output")
+        node = onnx.helper.make_node(
+            self._op_name,
+            [input_name, axes_name],
+            [node_output_name],
+            _graph_utils.generate_graph_name(self._op_name),
+            **self._attributes,
+        )
+        onnx_model.graph.node.append(node)
+
+        return node_output_name
 
 class MaskedSumLoss(
     onnxblock.blocks.Block,
@@ -30,7 +69,7 @@ class AdversarialLoss_SquaredDiffLoss(
         super().__init__()
         self._sub = onnxblock.blocks.Sub()
         self._pow = onnxblock.blocks.Pow(2.0)
-        self._reduce_sum = onnxblock.blocks.ReduceSum(keepdims=False)
+        self._reduce_sum = ReduceSum(axes=[-1], keepdims=False)
         set_temp_file_names(self, temp_dir, f"loss")
 
     def build(self, target, output):
@@ -49,8 +88,8 @@ class AdversarialLoss_NormalizedSquaredDiffLoss(
         self._sub_outputs = onnxblock.blocks.Sub()
         self._pow_inputs = onnxblock.blocks.Pow(2.0)
         self._pow_outputs = onnxblock.blocks.Pow(2.0)
-        self._reduce_sum_inputs = onnxblock.blocks.ReduceSum(keepdims=False)
-        self._reduce_sum_outputs = onnxblock.blocks.ReduceSum(keepdims=False)
+        self._reduce_sum_inputs = ReduceSum(axes=[-1], keepdims=False)
+        self._reduce_sum_outputs = ReduceSum(axes=[-1], keepdims=False)
         self._div = onnxblock.blocks.Div()
         set_temp_file_names(self, temp_dir, f"loss")
 
@@ -75,8 +114,8 @@ class AdversarialLoss_EnvelopeDiffLoss(
         self._sub_outputs = onnxblock.blocks.Sub()
         self._pow_inputs = onnxblock.blocks.Pow(2.0)
         self._pow_outputs = onnxblock.blocks.Pow(2.0)
-        self._reduce_sum_inputs = onnxblock.blocks.ReduceSum(keepdims=False)
-        self._reduce_sum_outputs = onnxblock.blocks.ReduceSum(keepdims=False)
+        self._reduce_sum_inputs = ReduceSum(axes=[-1], keepdims=False)
+        self._reduce_sum_outputs = ReduceSum(axes=[-1], keepdims=False)
         self._div = onnxblock.blocks.Div()
         set_temp_file_names(self, temp_dir, f"loss")
 
