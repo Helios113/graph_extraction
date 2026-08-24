@@ -1,14 +1,16 @@
+2 Data
+    Generate tokens -- require the embedding matrix
+    Generate vectors
 
-1. Jacobian function
-2. Update loop
+    Make 2 more scripts -- talk to team on this
 
-2.5 Data
-    Either tokens or samples
-    
+
+
+    Jacobian sizes and batchsizes? How do they work? Why
 
 3. LAPAC checking
-    Poorly conditioned
-    Close to singular testing
+    Poorly conditioned --
+    Close to singular testing --
 
 
 

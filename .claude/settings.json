@@ -4,7 +4,9 @@
       "Edit(/nfs-share/pa511/code_bases/new_jac/execute/**)",
       "Write(/nfs-share/pa511/code_bases/new_jac/execute/**)",
       "Edit(/nfs-share/pa511/code_bases/new_jac/lapac/**)",
-      "Write(/nfs-share/pa511/code_bases/new_jac/lapac/**)"
+      "Write(/nfs-share/pa511/code_bases/new_jac/lapac/**)",
+      "Edit(/nfs-share/pa511/code_bases/new_jac/generate_data/**)",
+      "Write(/nfs-share/pa511/code_bases/new_jac/generate_data/**)"
 
     ],
     "deny": [

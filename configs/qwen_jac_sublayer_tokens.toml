@@ -1,0 +1,20 @@
+name = "qwen_jac"
+model = "Qwen/Qwen2.5-0.5B"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 151646
+batch = 32                   
+seq = 8
+d_model = 896
+
+[input_source]
+mode = "fixed_norm"
+norm = 10
+norm_spread = 1e-3
+
+
+
+[[sublayers]]
+input = "add_6"
+output = "add_8"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]

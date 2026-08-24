@@ -13,17 +13,90 @@ import onnxruntime.training.onnxblock.blocks as blocks
 import onnxruntime.training.onnxblock.model_accessor as accessor
 
 
-class GradientBlock(blocks.Block):
-    
+def _reorder_outputs_including_intermediates(
+    model: onnx.ModelProto,
+    user_output_names: List[str],
+    requires_grad: set[str],
+) -> None:
+    """Like onnxblock's _reorder_outputs, but also keeps {name}_grad outputs
+    for names in requires_grad that are internal activations rather than
+    graph inputs. GradientGraphBuilder computes and emits these gradients
+    regardless of whether the name is a graph input; onnxblock's own
+    _reorder_outputs silently drops them because it only scans
+    model.graph.input.
+    """
+    graph_outputs = {output.name: output for output in model.graph.output}
+    ordered_graph_outputs = [graph_outputs[name] for name in user_output_names]
 
-    def __init__(self, accumulate_gradients = False):
+    seen = set()
+    for arg in model.graph.input:
+        if arg.name in requires_grad:
+            gradient_name = f"{arg.name}_grad"
+            ordered_graph_outputs.append(graph_outputs[gradient_name])
+            seen.add(arg.name)
+
+    for name in requires_grad - seen:
+        gradient_name = f"{name}_grad"
+        if gradient_name in graph_outputs:
+            ordered_graph_outputs.append(graph_outputs[gradient_name])
+
+    del model.graph.output[:]
+    model.graph.output.extend(ordered_graph_outputs)
+
+
+def _build_gradient_graph_with_intermediates(
+    model: onnx.ModelProto,
+    requires_grad: set[str],
+    frozen_params: set[str],
+    output_names,
+    custom_op_library=None,
+) -> Tuple[onnx.ModelProto, onnx.ModelProto]:
+    """Same as onnxblock._training_graph_utils.build_gradient_graph, except
+    it uses _reorder_outputs_including_intermediates so gradients requested
+    for internal activations (not just graph inputs/initializers) survive.
+    """
+    import copy
+    import os
+    from onnxruntime import SessionOptions
+    from onnxruntime.capi._pybind_state import get_optimized_model
+
+    if isinstance(output_names, str):
+        output_names = [output_names]
+
+    _training_graph_utils._move_initializers_to_inputs(
+        model, requires_grad.union(frozen_params)
+    )
+
+    eval_model = copy.deepcopy(model)
+    _training_graph_utils._disable_training_mode(eval_model)
+
+    options = SessionOptions()
+    if custom_op_library is not None:
+        options.register_custom_ops_library(os.fspath(custom_op_library))
+
+    optimized_model = onnx.load_from_string(
+        get_optimized_model(model.SerializeToString(), requires_grad, options)
+    )
+
+    gradient_model = _training_graph_utils._gradient_model_for(
+        optimized_model, requires_grad, output_names[0], options
+    )
+
+    _reorder_outputs_including_intermediates(
+        gradient_model, output_names, requires_grad
+    )
+
+    return gradient_model, eval_model
+
+
+class GradientBlock(blocks.Block):
+    def __init__(self, accumulate_gradients=False):
         super().__init__()
         self._requires_grad = set()
         self._frozen_params = set()
         self._parameters = None
         self._training_model = None
         self._eval_model = None
-        # Add way to change this
         self._accumulate_gradients = accumulate_gradients
 
     @abstractmethod
@@ -73,7 +146,9 @@ class GradientBlock(blocks.Block):
             RuntimeError: If the build method has not been invoked (i.e. the training model has not been built yet).
         """
         if self._parameters is None:
-            raise RuntimeError("Please build the training model first before trying to retrieve the parameters.")
+            raise RuntimeError(
+                "Please build the training model first before trying to retrieve the parameters."
+            )
 
         return self._parameters
 
@@ -91,7 +166,9 @@ class GradientBlock(blocks.Block):
             RuntimeError: If the build method has not been invoked (i.e. the training model has not been built yet).
         """
         if self._training_model is None or self._eval_model is None:
-            raise RuntimeError("Please build the training and eval models first before trying to retrieve them.")
+            raise RuntimeError(
+                "Please build the training and eval models first before trying to retrieve them."
+            )
         return self._training_model, self._eval_model
 
     def __call__(self, *args, **kwargs):
@@ -105,17 +182,34 @@ class GradientBlock(blocks.Block):
 
         _graph_utils.register_graph_outputs(model, output)
 
-        logging.debug("Building gradient graph for training block %s", self.__class__.__name__)
+        logging.debug(
+            "Building gradient graph for training block %s", self.__class__.__name__
+        )
 
-        self._parameters = _training_graph_utils.get_model_parameters(model, self._requires_grad, self._frozen_params)
+        self._parameters = _training_graph_utils.get_model_parameters(
+            model, self._requires_grad, self._frozen_params
+        )
 
-        self._training_model, self._eval_model = _training_graph_utils.build_gradient_graph(
-            model, self._requires_grad, self._frozen_params, output, accessor._GLOBAL_CUSTOM_OP_LIBRARY
+        # self._training_model, self._eval_model = _training_graph_utils.build_gradient_graph(
+
+        self._training_model, self._eval_model = (
+            _build_gradient_graph_with_intermediates(
+                model,
+                self._requires_grad,
+                self._frozen_params,
+                output,
+                accessor._GLOBAL_CUSTOM_OP_LIBRARY,
+            )
         )
 
         if self._accumulate_gradients:
-            logging.debug("Adding gradient accumulation nodes for training block %s", self.__class__.__name__)
-            _training_graph_utils.build_gradient_accumulation_graph(self._training_model, self._requires_grad)
+            logging.debug(
+                "Adding gradient accumulation nodes for training block %s",
+                self.__class__.__name__,
+            )
+            _training_graph_utils.build_gradient_accumulation_graph(
+                self._training_model, self._requires_grad
+            )
 
         accessor._GLOBAL_ACCESSOR.model.CopyFrom(self._training_model)
 

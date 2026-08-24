@@ -3,4 +3,4 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-added-large-files
-        args: ['--maxkb=1024']  # 10 MB, applies to ALL files, not just onnx
+        args: ['--maxkb=5120']  # 10 MB, applies to ALL files, not just onnx

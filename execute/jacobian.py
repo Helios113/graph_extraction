@@ -7,17 +7,18 @@ def compute_jacobian(
     input_data: np.ndarray,
     input_name: str,
     mask_name: str,
+    mask_dtype: np.dtype,
     gradient_output_name: str,
     output_shape: list[int],
     mode: str = "diagonal",
 ) -> np.ndarray:
     if mode == "full":
         return _compute_jacobian_full(
-            session, input_data, input_name, mask_name, gradient_output_name, output_shape,
+            session, input_data, input_name, mask_name, mask_dtype,gradient_output_name, output_shape,
         )
     if mode == "diagonal":
         return _compute_jacobian_diagonal(
-            session, input_data, input_name, mask_name, gradient_output_name, output_shape,
+            session, input_data, input_name, mask_name,mask_dtype, gradient_output_name, output_shape,
         )
     raise ValueError(f"mode must be 'full' or 'diagonal', got {mode!r}")
 
@@ -27,6 +28,7 @@ def _compute_jacobian_full(
     input_data: np.ndarray,
     input_name: str,
     mask_name: str,
+    mask_dtype: np.dtype,
     gradient_output_name: str,
     output_shape: list[int],
 ) -> np.ndarray:
@@ -37,7 +39,7 @@ def _compute_jacobian_full(
     # Iterate through standard basis vectors e_i
     for i in range(M):
         # Create one-hot mask with identical shape and dtype as the output
-        mask = np.zeros(M, dtype=input_data.dtype)
+        mask = np.zeros(M, dtype=mask_dtype)
         mask[i] = 1.0
         mask = mask.reshape(output_shape)
 
@@ -62,14 +64,12 @@ def _compute_jacobian_diagonal(
     input_data: np.ndarray,
     input_name: str,
     mask_name: str,
+    mask_dtype: np.dtype,
     gradient_output_name: str,
     output_shape: list[int],
 ) -> np.ndarray:
     x, y, z = output_shape
-    if input_data.shape != (x, y, z):
-        raise ValueError(
-            f"input_data.shape {input_data.shape} must match output_shape {output_shape}",
-        )
+
     if not np.all(input_data == input_data[:1]):
         raise ValueError(
             "mode='diagonal' requires input_data's batch slots to all be identical "
@@ -78,12 +78,12 @@ def _compute_jacobian_diagonal(
         )
 
     positions = [(s, d) for s in range(y) for d in range(z)]  # y*z (seq_pos, dim) pairs
-    diagonal = np.empty((x, y, z, z), dtype=input_data.dtype)
+    diagonal = np.empty((y, z, z), dtype=mask_dtype)
 
     for chunk_start in range(0, len(positions), x):
         chunk = positions[chunk_start : chunk_start + x]
 
-        mask = np.zeros((x, y, z), dtype=input_data.dtype)
+        mask = np.zeros((x, y, z), dtype=mask_dtype)
         for slot, (s, d) in enumerate(chunk):
             mask[slot, s, d] = 1.0
 
@@ -95,12 +95,9 @@ def _compute_jacobian_diagonal(
             },
         )
         grad_x = outputs[0]  # (x, y, z)
-
+        print(grad_x.shape)
         for slot, (s, d) in enumerate(chunk):
-            # grad_x[slot] = d(output[slot, s, d]) / d(input[slot, :, :]); every
-            # batch slot holds the same input, so this is also d(output at
-            # position s)/d(input at position s) for every other slot -- read it
-            # off slot's own row and store it for every batch entry.
-            diagonal[:, s, d, :] = grad_x[slot, s, :]
+
+            diagonal[s, d, :] = grad_x[slot, s, :]
 
     return diagonal

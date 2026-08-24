@@ -94,7 +94,7 @@ def generate_artifacts(
     with onnxblock.base(loaded_model, str(model_path)):
         _ = gradients_block(*[output.name for output in loaded_model.graph.output])
         gradients_model, loss_model = gradients_block.to_model_proto()
-        model_params = gradients_block.parameters()
+
 
     def _save_with_data_file(model_proto, model_path, data_file_name):
         onnx.save(
