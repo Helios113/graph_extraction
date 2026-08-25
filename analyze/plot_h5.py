@@ -7,9 +7,7 @@ Usage:
 
 import argparse
 
-import h5py
-import matplotlib.pyplot as plt
-import numpy as np
+
 
 
 def print_structure(h5file: h5py.File) -> None:

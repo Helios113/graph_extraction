@@ -8,7 +8,7 @@ def compute_jacobian(
     input_name: str,
     mask_name: str,
     mask_dtype: np.dtype,
-    gradient_output_name: str,
+    gradient_output_name: list[str],
     output_shape: list[int],
     mode: str = "diagonal",
 ) -> np.ndarray:
@@ -65,7 +65,7 @@ def _compute_jacobian_diagonal_single(
     input_name: str,
     mask_name: str,
     mask_dtype: np.dtype,
-    gradient_output_name: str,
+    gradient_output_name: list[str],
     compute_batch: int,
     y: int,
     z: int,
@@ -92,12 +92,15 @@ def _compute_jacobian_diagonal_single(
         # Last chunk may be smaller than compute_batch; only feed as many
         # broadcast input rows as there are mask slots in use.
         outputs = session.run(
-            [gradient_output_name],
+            gradient_output_name,
             {
                 input_name: input_data[: len(chunk)],
                 mask_name: mask[: len(chunk)],
             },
         )
+        print(outputs)
+        print(outputs.shape)
+        
         grad_x = outputs[0]  # (len(chunk), y, z)
         for slot, (s, d) in enumerate(chunk):
             diagonal[s, d, :] = grad_x[slot, s, :]
@@ -111,7 +114,7 @@ def _compute_jacobian_diagonal(
     input_name: str,
     mask_name: str,
     mask_dtype: np.dtype,
-    gradient_output_name: str,
+    gradient_output_name: list[str],
     output_shape: list[int],
 ) -> np.ndarray:
     """Diagonal Jacobian over a batch of *distinct* data samples.

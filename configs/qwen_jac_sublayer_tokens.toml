@@ -1,4 +1,4 @@
-name = "qwen_jac"
+name = "qwen_jac_tokens"
 model = "Qwen/Qwen2.5-0.5B"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
 input_name = "input_ids"
 vocab_size = 151646
@@ -13,9 +13,39 @@ dataset_config = "wikitext-2-raw-v1"
 split = "train"
 text_column = "text"
 
+[[sublayers]]
+input = "embedding"
+output = "add_6"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]
+
 
 [[sublayers]]
 input = "add_6"
 output = "add_8"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]
+
+[[sublayers]]
+input = "add_68"
+output = "add_72"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]
+
+[[sublayers]]
+input = "add_72"
+output = "add_74"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]
+
+[[sublayers]]
+input = "add_140"
+output = "add_144"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 896]
+
+[[sublayers]]
+input = "add_144"
+output = "add_146"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 8, 896]

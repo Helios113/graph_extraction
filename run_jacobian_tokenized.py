@@ -17,6 +17,7 @@ from construct.construct import (
     ensure_subgraph_pullback,
     ensure_subgraphs,
 )
+from construct.subgraph_extract import generate_union_of_subgraphs
 
 # execution code
 from execute.jacobian import compute_jacobian
@@ -41,6 +42,7 @@ sub_graphs_pullbacks = ensure_subgraph_pullback(
     base_model_path=cfg.base_model_path,
 )
 
+model_path= generate_union_of_subgraphs(sub_graphs_pullbacks)
 # Get inputs
 x = get_token_ids_array(cfg.input_source, seq_len=cfg.seq)
 
@@ -54,7 +56,7 @@ sess_options.intra_op_num_threads = 8  # pick a value <= your usable core count
 
 
 out_sess = ort.InferenceSession(
-    sub_graphs_pullbacks[0],
+    model_path,
     sess_options=sess_options,
     providers=["CUDAExecutionProvider"],
 )
@@ -68,7 +70,7 @@ jacobians = compute_jacobian(
     input_name="input_ids",
     mask_name="mask",
     mask_dtype=ml_dtypes.bfloat16,
-    gradient_output_name="add_6_grad",
+    gradient_output_name=["embedding_grad","add_6_grad",],
     output_shape=[32, 8, 896],
     mode="diagonal",
 )
@@ -76,13 +78,13 @@ jacobians = compute_jacobian(
 
 # Save everything
 
-with h5py.File("jacobians.h5", "w") as f:
+with h5py.File("results/jacobians.h5", "w") as f:
     f.create_dataset("jacobians", data=jacobians)
 
 jac_tensor = torch.from_numpy(jacobians.astype(np.float32)).cuda()
 
 # 2. Compute singular values and save directly
-with h5py.File("singular_values.h5", "w") as f:
+with h5py.File("results/singular_values.h5", "w") as f:
     f.create_dataset(
         "singular_values", data=torch.linalg.svdvals(jac_tensor).cpu().numpy(),
     )
@@ -90,10 +92,10 @@ with h5py.File("singular_values.h5", "w") as f:
 # 3. Compute signs, log-determinants and save to separate files
 signs, log_abs_dets = torch.linalg.slogdet(jac_tensor)
 
-with h5py.File("signs.h5", "w") as f:
+with h5py.File("results/signs.h5", "w") as f:
     f.create_dataset("signs", data=signs.cpu().numpy())
 
-with h5py.File("log_determinants.h5", "w") as f:
+with h5py.File("results/log_determinants.h5", "w") as f:
     f.create_dataset("log_determinants", data=log_abs_dets.cpu().numpy())
 
 # 4. Clean up allocated GPU and CPU memory
