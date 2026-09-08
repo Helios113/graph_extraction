@@ -467,3 +467,239 @@ zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:33717')
 [I 2026-09-08 11:15:00.425 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
 [I 2026-09-08 11:15:00.425 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
 [IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-08 12:32:18.158 ServerApp] 302 GET / (@127.0.0.1) 0.53ms
+[W 2026-09-08 12:32:18.634 ServerApp] 404 GET /login? (96b9bb817aa74877b462c785fdfec27e@127.0.0.1) 2.71ms referer=None
+[I 2026-09-08 12:37:15.443 ServerApp] Starting buffering for 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3:c46c75e6-2fb9-4e20-9327-05cbc332325b
+[I 2026-09-08 12:47:30.979 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 12:47:30.980 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[I 2026-09-08 12:47:30.980 ServerApp] Discarding 15 buffered messages for 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3:c46c75e6-2fb9-4e20-9327-05cbc332325b
+[I 2026-09-08 12:48:00.567 ServerApp] Kernel interrupted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 12:48:01.751 ServerApp] Kernel restarted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 12:48:01.755 ServerApp] Starting buffering for 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3:682a878d-b87e-4801-af64-8fb5e65b3896
+[I 2026-09-08 12:48:01.760 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 12:48:01.761 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[I 2026-09-08 12:48:01.761 ServerApp] Restoring connection for 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3:682a878d-b87e-4801-af64-8fb5e65b3896
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+2026-09-08 12:49:04.958818382 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-08 12:49:04.958857302 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 12:49:04.958899112 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 12:49:04.958912812 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 12:49:04.958924112 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 12:49:04.958938772 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.958949792 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.958958962 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 12:49:04.958992932 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 1 with status: OK
+2026-09-08 12:49:04.959190342 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_122'. It is no longer used by any node.
+2026-09-08 12:49:04.959193552 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_119'. It is no longer used by any node.
+2026-09-08 12:49:04.959195762 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_127'. It is no longer used by any node.
+2026-09-08 12:49:04.959198112 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_134'. It is no longer used by any node.
+2026-09-08 12:49:04.959200112 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_126'. It is no longer used by any node.
+2026-09-08 12:49:04.959215652 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959225952 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959235852 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959244942 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959254022 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959265062 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 12:49:04.959274232 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959283072 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 12:49:04.959292932 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 12:49:04.959319452 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 12:49:04.959328552 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959346382 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 12:49:04.959364922 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 1
+2026-09-08 12:49:04.959367852 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-08 12:49:04.959529122 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 12:49:04.959561812 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 12:49:04.959570812 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 12:49:04.959580142 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959591632 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959607752 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959616402 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959627832 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959636312 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959644842 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959653842 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959662582 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959671192 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959680932 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 12:49:04.959689562 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959698082 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 12:49:04.959706752 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 12:49:04.959729232 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 12:49:04.959737822 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 12:49:04.959751522 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 12:49:04.959769242 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 1 with status: OK
+2026-09-08 12:49:04.959948212 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 12:49:04.974290173 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+[I 2026-09-08 13:48:57.704 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 13:48:57.705 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[I 2026-09-08 13:50:04.806 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 13:50:04.807 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[W 2026-09-08 13:50:05.473 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (aef8a27f7d214071a6ab43c29f87d1ec@127.0.0.1) 2.69ms referer=None
+[W 2026-09-08 13:50:05.474 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (ead0796625864667a43fd2f3ccafb712@127.0.0.1) 1.22ms referer=None
+[I 2026-09-08 13:50:11.959 ServerApp] Kernel restarted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 13:50:11.966 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 13:50:11.967 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+2026-09-08 13:54:24.693349020 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-08 13:54:24.693392849 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:54:24.693436369 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:54:24.693447529 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:54:24.693457529 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693471729 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693481960 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693490440 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693538680 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 1 with status: OK
+2026-09-08 13:54:24.693731689 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_124'. It is no longer used by any node.
+2026-09-08 13:54:24.693735860 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_123'. It is no longer used by any node.
+2026-09-08 13:54:24.693737960 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_131'. It is no longer used by any node.
+2026-09-08 13:54:24.693740009 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_116'. It is no longer used by any node.
+2026-09-08 13:54:24.693741900 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_119'. It is no longer used by any node.
+2026-09-08 13:54:24.693757549 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693767029 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693776380 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693790389 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693799389 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693810140 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:54:24.693818860 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693827409 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:54:24.693836309 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:54:24.693863980 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:54:24.693872749 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:54:24.693890649 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:54:24.693909769 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 1
+2026-09-08 13:54:24.693912740 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-08 13:54:24.694073020 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:54:24.694107209 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:54:24.694115949 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:54:24.694124789 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694136589 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694146349 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694154289 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694165389 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694173660 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694181760 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694190160 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694198369 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694206560 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694216280 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:54:24.694224720 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694232760 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:54:24.694241120 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:54:24.694263389 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:54:24.694272009 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:54:24.694286089 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:54:24.694303380 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 1 with status: OK
+2026-09-08 13:54:24.694482409 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:54:24.704586590 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+[I 2026-09-08 13:55:43.098 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 13:55:43.099 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[I 2026-09-08 13:56:00.947 ServerApp] Kernel interrupted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 13:56:03.939 ServerApp] Kernel restarted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 13:56:03.948 ServerApp] Adapting from protocol version 5.3 (kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3) to 5.4 (client).
+[I 2026-09-08 13:56:03.948 ServerApp] Connecting to kernel 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3.
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+2026-09-08 13:56:19.755421129 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-08 13:56:19.755460409 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:19.755503459 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:56:19.755518119 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:19.755530249 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755545939 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755558349 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755568569 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755611549 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 1 with status: OK
+2026-09-08 13:56:19.755832259 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_122'. It is no longer used by any node.
+2026-09-08 13:56:19.755835589 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_119'. It is no longer used by any node.
+2026-09-08 13:56:19.755837879 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_127'. It is no longer used by any node.
+2026-09-08 13:56:19.755840249 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_134'. It is no longer used by any node.
+2026-09-08 13:56:19.755842319 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_126'. It is no longer used by any node.
+2026-09-08 13:56:19.755857959 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755868249 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755878189 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755887139 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755896499 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755907379 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:56:19.755916429 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755925679 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:56:19.755934939 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:56:19.755962029 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:56:19.755971049 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:56:19.755988839 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:19.756007599 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 1
+2026-09-08 13:56:19.756010559 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-08 13:56:19.756178279 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:19.756211739 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:56:19.756220779 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:19.756230019 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756241709 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756251689 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756259839 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756271289 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756280229 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756288659 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756297499 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756306009 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756314499 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756324249 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:56:19.756332759 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756341229 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:56:19.756349739 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:56:19.756372789 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:56:19.756381839 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:56:19.756395579 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:19.756413149 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 1 with status: OK
+2026-09-08 13:56:19.756593639 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:19.771063819 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+2026-09-08 13:56:32.838294908 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-08 13:56:32.838332039 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:32.838371468 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:56:32.838382208 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:32.838392888 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838406868 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838417788 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838426328 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838466768 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 1 with status: OK
+2026-09-08 13:56:32.838660628 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_124'. It is no longer used by any node.
+2026-09-08 13:56:32.838664999 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_123'. It is no longer used by any node.
+2026-09-08 13:56:32.838667128 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_131'. It is no longer used by any node.
+2026-09-08 13:56:32.838669219 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_116'. It is no longer used by any node.
+2026-09-08 13:56:32.838671108 [I:onnxruntime:Default, graph.cc:4288 CleanUnusedInitializersAndNodeArgs] Removing initializer 'val_119'. It is no longer used by any node.
+2026-09-08 13:56:32.838686359 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838696168 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838705348 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838713999 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838722879 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838733308 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:56:32.838741959 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838750499 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:56:32.838759728 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:56:32.838786868 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:56:32.838795719 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:56:32.838813019 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:32.838837759 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 1
+2026-09-08 13:56:32.838840808 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-08 13:56:32.839012499 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:32.839045548 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-08 13:56:32.839054279 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-08 13:56:32.839063179 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839074119 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839083559 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839091399 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839102259 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839110519 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839118679 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839127008 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839135188 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839143348 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839152759 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-08 13:56:32.839160979 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839169048 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-08 13:56:32.839177368 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-08 13:56:32.839199079 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-08 13:56:32.839207399 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-08 13:56:32.839220448 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:32.839238019 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 1 with status: OK
+2026-09-08 13:56:32.839403639 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-08 13:56:32.858689169 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+[I 2026-09-08 13:58:10.673 ServerApp] Kernel interrupted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3
+[I 2026-09-08 13:59:57.865 ServerApp] Kernel interrupted: 48fb8bfb-9b25-4a97-a6bb-f64c3f8b61c3

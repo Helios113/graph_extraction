@@ -1,0 +1,21 @@
+name = "smoll"
+model = "HuggingFaceTB/SmolLM-360M"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 49152
+batch = 32                   # 14336 (8*896) Jacobian elements chunked in batches of this size; also
+                               # evenly divides d_model=896 for jacobian_position-restricted (single-token) runs
+seq = 8
+d_model = 960
+
+[input_source]
+tokenizer = "HuggingFaceTB/SmolLM-360M"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
+
+[[sublayers]]
+input = "embedding"
+output = "add_6"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 960]
