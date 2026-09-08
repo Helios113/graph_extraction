@@ -57,6 +57,7 @@ def generate_artifacts(
                     )
 
                 loss_output = self._loss(*inputs_to_loss)
+                print("In additional outputs", (loss_output, *tuple(additional_output_names)))
                 if isinstance(loss_output, tuple):
                     return (*loss_output, *tuple(additional_output_names))
                 else:

@@ -89,7 +89,7 @@ out = out_sess.run(
     None,
     {input_names[0]: x},
 )
-y0 = sample_around_points(x, n_samples=1000).astype(ml_dtypes.bfloat16)
+y0 = sample_around_points(x, n_samples=10, max_radius=1e-3).astype(ml_dtypes.bfloat16)
 
 # Sample around all of these points
 
@@ -111,3 +111,28 @@ y_final, loss_history = optimization_loop(
     steps=1000,
     optimizer=optim,
 )
+
+print(y_final.shape)
+import matplotlib.pyplot as plt
+
+x32 = x.astype(np.float32)
+fx = out_sess.run(None, {input_names[0]: x})[0].astype(np.float32)
+
+dx_list = []
+dfx_list = []
+for s in range(y_final.shape[0]):
+    y_s = y_final[s]
+    fy_s = out_sess.run(None, {input_names[0]: y_s})[0].astype(np.float32)
+    dx_list.append(np.linalg.norm(y_s.astype(np.float32) - x32, axis=-1))
+    dfx_list.append(np.linalg.norm(fy_s - fx, axis=-1))
+
+dx = np.concatenate([d.ravel() for d in dx_list])
+dfx = np.concatenate([d.ravel() for d in dfx_list])
+
+plt.figure(figsize=(6, 6))
+plt.scatter(dx, dfx, s=4, alpha=0.3)
+plt.xlabel("||y - x||")
+plt.ylabel("||f(y) - f(x)||")
+plt.title("||f(y) - f(x)|| vs ||y - x||")
+plt.tight_layout()
+plt.savefig("lipschitz_scatter.png", dpi=150)

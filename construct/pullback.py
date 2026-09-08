@@ -220,7 +220,7 @@ def generate_subgraph_pullback(
         )
     
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
-
+        print(output_name)
         generated_path = generate_artifacts(
             target_path,
             save_directory=sub_graph_path.parent,
@@ -231,6 +231,7 @@ def generate_subgraph_pullback(
             save_loss_model=False,
             optimizer = optimizer_type,
             optimizer_model_name=f"{prefix}_optimizer.onnx",
+            additional_output_names = [output_name],
             
         )
 

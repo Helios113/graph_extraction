@@ -2,7 +2,7 @@ import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from config import InputSourceConfig  # add to imports at top
-
+import torch
 
 
 def sample_ambient_points(
@@ -21,6 +21,34 @@ def sample_ambient_points(
     """
     rng = np.random.default_rng(seed)
     return rng.uniform(low=low, high=high, size=(batch,seq, dim))
+def sample_around_points_gpu(
+    points: torch.Tensor,          # (batch, seq, dim), on GPU
+    n_samples: int,
+    min_radius: float = 0.0,
+    max_radius: float = 1.0,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    device = points.device
+    batch, seq, dim = points.shape
+
+    directions = torch.randn(
+        (n_samples, batch, seq, dim), device=device, dtype=torch.float32, generator=generator
+    )
+    directions /= directions.norm(dim=-1, keepdim=True)
+
+    u = torch.rand((n_samples, batch, seq, 1), device=device, dtype=torch.float32, generator=generator)
+
+    if min_radius == 0.0:
+        radii = max_radius * u.pow(1.0 / dim)
+    else:
+        ratio = min_radius / max_radius
+        radii = max_radius * (ratio**dim + u * (1.0 - ratio**dim)).pow(1.0 / dim)
+
+    directions.mul_(radii)                      # in-place: normalize+scale fused into one pass
+    perturbed = directions.add_(points.unsqueeze(0))  # in-place add
+
+    return perturbed.to(torch.bfloat16)
+
 
 def sample_around_points(
     points: np.ndarray,
@@ -33,16 +61,21 @@ def sample_around_points(
 
     batch, seq, dim = points.shape
 
-    directions = rng.standard_normal((n_samples, batch, seq, dim))
-    directions /= np.linalg.norm(directions, axis=-1, keepdims=True)
+    directions = rng.standard_normal((n_samples, batch, seq, dim), dtype=np.float32)
+    norm_sq = np.einsum('nbsd,nbsd->nbs', directions, directions)[..., None]
+    norm = np.sqrt(norm_sq)
 
     u = rng.uniform(0.0, 1.0, size=(n_samples, batch, seq, 1))
-    radii = (min_radius**dim + u * (max_radius**dim - min_radius**dim)) ** (
-        1.0 / dim
-    )
+    if min_radius == 0.0:
+        radii = max_radius * u ** (1.0 / dim)
+    else:
+        ratio = min_radius / max_radius
+        radii = max_radius * (ratio**dim + u * (1.0 - ratio**dim)) ** (1.0 / dim)
 
-    perturbed = points[None, ...] + directions * radii
-    print(perturbed.shape)
+    scale = (radii / norm).astype(np.float32)
+    directions *= scale                          # combines normalize + radius-scale into one pass
+    np.add(directions, points[None, ...], out=directions)  # in-place add
+    perturbed = directions
 
     return perturbed
 
@@ -94,3 +127,7 @@ def get_token_ids_array(
         raise ValueError(f"dataset only yielded {len(rows)} examples with >= {seq_len} tokens, need {batch}")
 
     return np.asarray(rows, dtype=np.int64)
+
+
+
+

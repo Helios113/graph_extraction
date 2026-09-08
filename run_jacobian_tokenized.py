@@ -88,6 +88,13 @@ with h5py.File("results/singular_values.h5", "w") as f:
     f.create_dataset(
         "singular_values", data=torch.linalg.svdvals(jac_tensor).cpu().numpy(),
     )
+    
+# 2. Compute singular values and save directly
+with h5py.File("results/eigen_vals.h5", "w") as f:
+    f.create_dataset(
+        "singular_values", data=torch.linalg.eigvals(jac_tensor).cpu().numpy(),
+    )
+
 
 # 3. Compute signs, log-determinants and save to separate files
 signs, log_abs_dets = torch.linalg.slogdet(jac_tensor)

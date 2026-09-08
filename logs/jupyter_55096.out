@@ -1,0 +1,179 @@
+Job 55096 running on ruapehu.cl.cam.ac.uk, port 8888
+[W 2026-09-02 14:50:41.044 ServerApp] ServerApp.token config is deprecated in 2.0. Use IdentityProvider.token.
+[I 2026-09-02 14:50:41.142 ServerApp] jupyter_lsp | extension was successfully linked.
+[I 2026-09-02 14:50:41.148 ServerApp] jupyter_server_terminals | extension was successfully linked.
+[I 2026-09-02 14:50:41.152 ServerApp] jupyterlab | extension was successfully linked.
+[I 2026-09-02 14:50:41.157 ServerApp] notebook | extension was successfully linked.
+[I 2026-09-02 14:50:41.493 ServerApp] notebook_shim | extension was successfully linked.
+[W 2026-09-02 14:50:41.534 ServerApp] All authentication is disabled.  Anyone who can connect to this server will be able to run code.
+[I 2026-09-02 14:50:41.534 ServerApp] notebook_shim | extension was successfully loaded.
+[I 2026-09-02 14:50:41.536 ServerApp] jupyter_lsp | extension was successfully loaded.
+[I 2026-09-02 14:50:41.536 ServerApp] jupyter_server_terminals | extension was successfully loaded.
+[I 2026-09-02 14:50:41.545 LabApp] JupyterLab extension loaded from /nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/jupyterlab
+[I 2026-09-02 14:50:41.545 LabApp] JupyterLab application directory is /nfs-share/pa511/code_bases/new_jac/.venv/share/jupyter/lab
+[I 2026-09-02 14:50:41.545 LabApp] Extension Manager is 'pypi'.
+[I 2026-09-02 14:50:41.593 ServerApp] jupyterlab | extension was successfully loaded.
+[I 2026-09-02 14:50:41.597 ServerApp] notebook | extension was successfully loaded.
+[I 2026-09-02 14:50:41.598 ServerApp] Serving notebooks from local directory: /nfs-share/pa511/code_bases/new_jac
+[I 2026-09-02 14:50:41.598 ServerApp] Jupyter Server 2.20.0 is running at:
+[I 2026-09-02 14:50:41.598 ServerApp] http://127.0.0.1:8888/lab
+[I 2026-09-02 14:50:41.598 ServerApp] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[I 2026-09-02 14:50:41.635 ServerApp] Skipped non-installed server(s): basedpyright, bash-language-server, dockerfile-language-server-nodejs, javascript-typescript-langserver, jedi-language-server, julia-language-server, pyrefly, pyright, python-language-server, python-lsp-server, r-languageserver, sql-language-server, texlab, typescript-language-server, unified-language-server, vscode-css-languageserver-bin, vscode-html-languageserver-bin, vscode-json-languageserver-bin, yaml-language-server
+[W 2026-09-02 14:51:42.217 ServerApp] 404 GET /hub/api (2b44a92ad5344fce8ea808f1f5c6398e@127.0.0.1) 27.64ms referer=None
+[I 2026-09-02 14:51:42.222 ServerApp] 302 GET / (@127.0.0.1) 0.19ms
+[W 2026-09-02 14:51:42.288 ServerApp] 404 GET /login? (84dddd374d8544ada49c63e878adecf4@127.0.0.1) 1.43ms referer=None
+[I 2026-09-02 14:51:58.796 ServerApp] Kernel started: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-02 14:51:59.269 ServerApp] Adapting from protocol version 5.3 (kernel 604b1e8f-a78b-4439-893e-8e5f30b50740) to 5.4 (client).
+[I 2026-09-02 14:51:59.270 ServerApp] Connecting to kernel 604b1e8f-a78b-4439-893e-8e5f30b50740.
+[W 2026-09-02 14:51:59.270 ServerApp] The websocket_ping_timeout (90000) cannot be longer than the websocket_ping_interval (30000).
+    Setting websocket_ping_timeout=30000
+[I 2026-09-02 14:53:33.475 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[I 2026-09-02 14:53:44.870 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[I 2026-09-02 14:53:46.332 ServerApp] Kernel restarted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[I 2026-09-02 14:53:46.337 ServerApp] Starting buffering for 604b1e8f-a78b-4439-893e-8e5f30b50740:097c4b4c-5614-4522-8663-37983ae1060f
+[I 2026-09-02 14:53:46.342 ServerApp] Adapting from protocol version 5.3 (kernel 604b1e8f-a78b-4439-893e-8e5f30b50740) to 5.4 (client).
+[I 2026-09-02 14:53:46.343 ServerApp] Connecting to kernel 604b1e8f-a78b-4439-893e-8e5f30b50740.
+[I 2026-09-02 14:53:46.343 ServerApp] Restoring connection for 604b1e8f-a78b-4439-893e-8e5f30b50740:097c4b4c-5614-4522-8663-37983ae1060f
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[0;93m2026-09-02 14:54:29.455221896 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 14:54:29.455561706 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 14:54:29.455566076 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:01:26.799408644 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:01:26.799789994 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:01:26.799794464 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[I 2026-09-02 15:01:29.321 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[0;93m2026-09-02 15:03:23.947978736 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:03:23.948326176 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:03:23.948330476 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:08:16.901894906 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:08:16.902237576 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:08:16.902242016 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[I 2026-09-02 15:08:25.073 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[0;93m2026-09-02 15:09:09.647976608 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:09:09.648324658 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:09:09.648329248 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:10:33.724146104 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:10:33.724509624 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:10:33.724513994 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[I 2026-09-02 15:10:49.009 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[0;93m2026-09-02 15:10:51.228867955 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:10:51.229233875 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:10:51.229238175 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+2026-09-02 15:12:28.905810626 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 3
+2026-09-02 15:12:28.905833186 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-02 15:12:28.905929306 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-02 15:12:28.905954397 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-02 15:12:28.905961206 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-02 15:12:28.905968017 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-02 15:12:28.905977157 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-02 15:12:28.905991246 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 1 with status: OK
+2026-09-02 15:12:28.906067497 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906075377 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906080717 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906086077 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906091926 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906097277 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906102697 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906110066 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-02 15:12:28.906115466 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-02 15:12:28.906120817 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-02 15:12:28.906126126 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-02 15:12:28.906144257 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-02 15:12:28.908012937 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908025986 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:12:28.908036437 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-02 15:12:28.908042937 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-02 15:12:28.908059666 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-02 15:12:28.908064997 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-02 15:12:28.908070906 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908077417 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908082626 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908087257 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908096097 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908100957 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908105917 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908110817 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908115686 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908120577 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908125977 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-02 15:12:28.908130817 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908135677 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-02 15:12:28.908140577 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-02 15:12:28.908153366 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-02 15:12:28.908158297 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-02 15:12:28.908165266 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:12:28.908170386 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:12:29.039176720 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+[0;93m2026-09-02 15:12:29.281298568 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:12:29.281658988 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:12:29.281663498 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:12:50.991434405 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:12:50.991783435 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:12:50.991788085 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:15:14.141691901 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:15:14.142051861 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:15:14.142056111 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[I 2026-09-02 15:15:17.474 ServerApp] Kernel interrupted: 604b1e8f-a78b-4439-893e-8e5f30b50740
+[0;93m2026-09-02 15:19:40.631511473 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:19:40.631880263 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:19:40.631885013 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:20:21.766844419 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:20:21.767193469 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:20:21.767197919 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+2026-09-02 15:21:24.246043181 [I:onnxruntime:Default, constant_sharing.cc:248 ApplyImpl] Total shared scalar initializer count: 3
+2026-09-02 15:21:24.246066371 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-09-02 15:21:24.246170551 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-02 15:21:24.246198141 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-02 15:21:24.246204641 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-02 15:21:24.246211441 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246220951 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246235351 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 1 with status: OK
+2026-09-02 15:21:24.246307271 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246315161 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246320651 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246326041 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246332071 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246337451 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246342911 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246350431 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-02 15:21:24.246355941 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246361451 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-02 15:21:24.246366851 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-02 15:21:24.246382241 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-02 15:21:24.246387711 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246398671 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:21:24.246407591 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantSharing modified: 0 with status: OK
+2026-09-02 15:21:24.246412951 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-09-02 15:21:24.246430531 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-09-02 15:21:24.246435731 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-09-02 15:21:24.246441201 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246448011 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246453261 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246458001 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer SoftmaxCrossEntropyLossInternalFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246465621 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246470611 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246475501 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer QDQFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246480471 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246485331 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer IsInfReduceSumFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246490301 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ScaledSumFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246495911 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-09-02 15:21:24.246500701 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246505561 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ShapeOptimizer modified: 0 with status: OK
+2026-09-02 15:21:24.246510391 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer ConcatSliceElimination modified: 0 with status: OK
+2026-09-02 15:21:24.246521631 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer PropagateCastOps modified: 0 with status: OK
+2026-09-02 15:21:24.246526561 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer CastSceLossFusion modified: 0 with status: OK
+2026-09-02 15:21:24.246533561 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:21:24.246538961 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-09-02 15:21:24.376048665 [I:onnxruntime:Default, graph_transformer.cc:15 Apply] GraphTransformer pre_training_rule_based_graph_transformer modified: 0 with status: OK
+[0;93m2026-09-02 15:21:24.595136871 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:21:24.595493241 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:21:24.595497771 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+[0;93m2026-09-02 15:23:46.320976495 [W:onnxruntime:, transformer_memcpy.cc:74 ApplyImpl] 5 Memcpy nodes are added to the graph Extracted from {main_graph} for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message.[m
+[0;93m2026-09-02 15:23:46.321334155 [W:onnxruntime:, session_state.cc:1168 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-09-02 15:23:46.321338405 [W:onnxruntime:, session_state.cc:1170 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+slurmstepd: error: *** JOB 55096 ON ruapehu CANCELLED AT 2026-09-02T16:29:39 ***
+[C 2026-09-02 16:29:39.809 ServerApp] received signal 15, stopping
+[I 2026-09-02 16:29:39.810 ServerApp] Shutting down 5 extensions
+[I 2026-09-02 16:29:39.810 ServerApp] Shutting down 1 kernel
+[I 2026-09-02 16:29:39.810 ServerApp] Kernel shutdown: 604b1e8f-a78b-4439-893e-8e5f30b50740

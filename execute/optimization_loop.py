@@ -4,6 +4,7 @@ import numpy as np
 import onnxruntime as ort
 import tqdm
 
+
 class Optimizer(Protocol):
     """An update rule for optimization_loop: given the current iterate and the
     loss gradient at that iterate, returns the next iterate. Every optimizer
@@ -80,7 +81,9 @@ class GaussNewton:
     keep the step bounded early on when the curvature estimate is still noisy.
     """
 
-    def __init__(self, lr: float = 1e-1, damping: float = 1e-4, dtype: np.dtype = np.float64):
+    def __init__(
+        self, lr: float = 1e-1, damping: float = 1e-4, dtype: np.dtype = np.float64
+    ):
         self.lr = np.array(lr, dtype=dtype)
         self.damping = np.array(damping, dtype=dtype)
         self._y_prev: np.ndarray | None = None
@@ -98,14 +101,16 @@ class GaussNewton:
         self._y_prev = y
         self._grad_prev = grad
         return y_next
-    
-    
+
+
 class NewtonRaphson:
     """Newton-Raphson root-finding on the gradient (i.e. Newton's method for
     minimization): y -= f(y)/ grad f(y).
     """
 
-    def __init__(self, lr: float = 1e-1, damping: float = 1e-4, dtype: np.dtype = np.float64):
+    def __init__(
+        self, lr: float = 1e-1, damping: float = 1e-4, dtype: np.dtype = np.float64
+    ):
         self.lr = np.array(lr, dtype=dtype)
         self.damping = np.array(damping, dtype=dtype)
         self._y_prev: np.ndarray | None = None
@@ -134,15 +139,11 @@ def optimization_loop(
     steps: int,
     optimizer: Optimizer,
 ) -> tuple[np.ndarray, np.ndarray]:
-   
-    print(x.shape)
-    print(target.shape)
-    print(y0.shape)
-    
+
     # Just iterate over y and then no need to copy the x and target
     loss_history = np.zeros((steps, *y0.shape[:-1]))
     y_n = np.zeros_like(y0)
-    for i in range(y0.shape[0]):
+    for i in tqdm.tqdm(range(y0.shape[0])):
         y = y0[i].copy()
 
         grad_output_name = f"{input_name}_grad"
@@ -157,15 +158,18 @@ def optimization_loop(
         )
 
         session_input_names = {i.name for i in gradient_session.get_inputs()}
-
-        for s in tqdm.tqdm(range(steps)):
-            feed = {input_name: y, "target": target,"x": x}
+        print("isnan y", np.isnan(y).any())
+        
+        for s in range(steps):
+            feed = {input_name: y, "target": target, "x": x}
             loss_val, grad_y = gradient_session.run(
-                [loss_output_name, grad_output_name], feed,
+                [loss_output_name, grad_output_name],
+                feed,
             )
-
+            if np.isnan(grad_y).any():
+                print("isnan y_grad")
+                print(loss_val)
             loss_history[s, i] = loss_val
             y = optimizer.step(y, grad_y)
         y_n[i] = y
-        print(loss_history[:,i,:,:].mean())
     return y_n, loss_history
