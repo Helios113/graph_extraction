@@ -1,0 +1,280 @@
+Job 55350 running on ruapehu.cl.cam.ac.uk, port 8888
+[W 2026-09-09 11:14:38.650 ServerApp] ServerApp.token config is deprecated in 2.0. Use IdentityProvider.token.
+[I 2026-09-09 11:14:38.701 ServerApp] jupyter_lsp | extension was successfully linked.
+[I 2026-09-09 11:14:38.704 ServerApp] jupyter_server_terminals | extension was successfully linked.
+[I 2026-09-09 11:14:38.706 ServerApp] jupyterlab | extension was successfully linked.
+[I 2026-09-09 11:14:38.708 ServerApp] notebook | extension was successfully linked.
+[I 2026-09-09 11:14:39.013 ServerApp] notebook_shim | extension was successfully linked.
+[W 2026-09-09 11:14:39.041 ServerApp] All authentication is disabled.  Anyone who can connect to this server will be able to run code.
+[I 2026-09-09 11:14:39.042 ServerApp] notebook_shim | extension was successfully loaded.
+[I 2026-09-09 11:14:39.043 ServerApp] jupyter_lsp | extension was successfully loaded.
+[I 2026-09-09 11:14:39.044 ServerApp] jupyter_server_terminals | extension was successfully loaded.
+[I 2026-09-09 11:14:39.050 LabApp] JupyterLab extension loaded from /nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/jupyterlab
+[I 2026-09-09 11:14:39.050 LabApp] JupyterLab application directory is /nfs-share/pa511/code_bases/new_jac/.venv/share/jupyter/lab
+[I 2026-09-09 11:14:39.050 LabApp] Extension Manager is 'pypi'.
+[I 2026-09-09 11:14:39.097 ServerApp] jupyterlab | extension was successfully loaded.
+[I 2026-09-09 11:14:39.101 ServerApp] notebook | extension was successfully loaded.
+[I 2026-09-09 11:14:39.102 ServerApp] Serving notebooks from local directory: /nfs-share/pa511/code_bases/new_jac
+[I 2026-09-09 11:14:39.102 ServerApp] Jupyter Server 2.20.0 is running at:
+[I 2026-09-09 11:14:39.102 ServerApp] http://127.0.0.1:8888/lab
+[I 2026-09-09 11:14:39.102 ServerApp] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[I 2026-09-09 11:14:39.120 ServerApp] Skipped non-installed server(s): basedpyright, bash-language-server, dockerfile-language-server-nodejs, javascript-typescript-langserver, jedi-language-server, julia-language-server, pyrefly, pyright, python-language-server, python-lsp-server, r-languageserver, sql-language-server, texlab, typescript-language-server, unified-language-server, vscode-css-languageserver-bin, vscode-html-languageserver-bin, vscode-json-languageserver-bin, yaml-language-server
+[W 2026-09-09 11:18:03.507 ServerApp] 404 GET /hub/api (6b8a03153b7c4c959fc9c998a6271e81@127.0.0.1) 22.73ms referer=None
+[I 2026-09-09 11:18:03.512 ServerApp] 302 GET / (@127.0.0.1) 0.18ms
+[W 2026-09-09 11:18:03.575 ServerApp] 404 GET /login? (d1320a1f44cf46418f3689942c767799@127.0.0.1) 1.36ms referer=None
+[I 2026-09-09 11:18:12.719 ServerApp] Kernel started: d96a9a0d-a1f0-42fa-82ee-f9e2dd163035
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 11:18:13.357 ServerApp] Adapting from protocol version 5.3 (kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035) to 5.4 (client).
+[I 2026-09-09 11:18:13.358 ServerApp] Connecting to kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035.
+[W 2026-09-09 11:18:13.359 ServerApp] The websocket_ping_timeout (90000) cannot be longer than the websocket_ping_interval (30000).
+    Setting websocket_ping_timeout=30000
+[W 2026-09-09 11:18:16.148 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (666d2db6037049919e41c0e64832fc35@127.0.0.1) 0.85ms referer=None
+[W 2026-09-09 11:18:16.149 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (ba6e0807490f4fbcbf6ae722b8d20e1b@127.0.0.1) 0.52ms referer=None
+[I 2026-09-09 11:21:50.273 ServerApp] Kernel interrupted: d96a9a0d-a1f0-42fa-82ee-f9e2dd163035
+[W 2026-09-09 11:22:07.465 ServerApp] Wait for final termination of kernel timed out - continuing...
+[I 2026-09-09 11:22:07.536 ServerApp] Kernel restarted: d96a9a0d-a1f0-42fa-82ee-f9e2dd163035
+[I 2026-09-09 11:22:07.539 ServerApp] Starting buffering for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[I 2026-09-09 11:22:07.544 ServerApp] Adapting from protocol version 5.3 (kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035) to 5.4 (client).
+[I 2026-09-09 11:22:07.544 ServerApp] Connecting to kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035.
+[I 2026-09-09 11:22:07.544 ServerApp] Restoring connection for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+Traceback (most recent call last):
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel_launcher.py", line 18, in <module>
+    app.launch_new_instance()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 1079, in launch_instance
+    app.initialize(argv)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 117, in inner
+    return method(app, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 760, in initialize
+    self.init_sockets()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 373, in init_sockets
+    self.shell_port = self._bind_socket(self.shell_socket, self.shell_port)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 280, in _bind_socket
+    return self._try_bind_socket(s, port)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 256, in _try_bind_socket
+    s.bind("tcp://%s:%i" % (self.ip, port))
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/zmq/sugar/socket.py", line 320, in bind
+    super().bind(addr)
+  File "zmq/backend/cython/_zmq.py", line 1009, in zmq.backend.cython._zmq.Socket.bind
+  File "zmq/backend/cython/_zmq.py", line 190, in zmq.backend.cython._zmq._check_rc
+zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:33661')
+[I 2026-09-09 11:22:10.529 ServerApp] AsyncIOLoopKernelRestarter: restarting kernel (1/5), keep random ports
+[W 2026-09-09 11:22:10.529 ServerApp] kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035 restarted
+[I 2026-09-09 11:22:10.533 ServerApp] Starting buffering for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[I 2026-09-09 11:22:10.554 ServerApp] Adapting from protocol version 5.3 (kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035) to 5.4 (client).
+[I 2026-09-09 11:22:10.937 ServerApp] Connecting to kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035.
+[I 2026-09-09 11:22:10.950 ServerApp] Restoring connection for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+Traceback (most recent call last):
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel_launcher.py", line 18, in <module>
+    app.launch_new_instance()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 1079, in launch_instance
+    app.initialize(argv)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 117, in inner
+    return method(app, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 760, in initialize
+    self.init_sockets()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 373, in init_sockets
+    self.shell_port = self._bind_socket(self.shell_socket, self.shell_port)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 280, in _bind_socket
+    return self._try_bind_socket(s, port)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 256, in _try_bind_socket
+    s.bind("tcp://%s:%i" % (self.ip, port))
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/zmq/sugar/socket.py", line 320, in bind
+    super().bind(addr)
+  File "zmq/backend/cython/_zmq.py", line 1009, in zmq.backend.cython._zmq.Socket.bind
+  File "zmq/backend/cython/_zmq.py", line 190, in zmq.backend.cython._zmq._check_rc
+zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:33661')
+[I 2026-09-09 11:22:13.543 ServerApp] AsyncIOLoopKernelRestarter: restarting kernel (2/5), keep random ports
+[W 2026-09-09 11:22:13.543 ServerApp] kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035 restarted
+[I 2026-09-09 11:22:13.546 ServerApp] Starting buffering for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[I 2026-09-09 11:22:13.569 ServerApp] Adapting from protocol version 5.3 (kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035) to 5.4 (client).
+[I 2026-09-09 11:22:13.574 ServerApp] Connecting to kernel d96a9a0d-a1f0-42fa-82ee-f9e2dd163035.
+[I 2026-09-09 11:22:13.582 ServerApp] Restoring connection for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[I 2026-09-09 11:22:13.582 ServerApp] Starting buffering for d96a9a0d-a1f0-42fa-82ee-f9e2dd163035:e90e643c-1eb5-4a8c-a9e3-40c120b70a31
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[W 2026-09-09 11:22:13.903 ServerApp] 
+[W 2026-09-09 11:22:13.961 ServerApp] 
+[W 2026-09-09 11:22:13.975 ServerApp] 
+[W 2026-09-09 11:22:13.976 ServerApp] 
+[W 2026-09-09 11:22:13.977 ServerApp] 
+[I 2026-09-09 11:25:45.318 ServerApp] Kernel started: 37915172-6fe8-4567-8369-d1e586ef895d
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 11:25:45.925 ServerApp] Adapting from protocol version 5.3 (kernel 37915172-6fe8-4567-8369-d1e586ef895d) to 5.4 (client).
+[I 2026-09-09 11:25:45.926 ServerApp] Connecting to kernel 37915172-6fe8-4567-8369-d1e586ef895d.
+[I 2026-09-09 11:25:49.936 ServerApp] Kernel interrupted: 37915172-6fe8-4567-8369-d1e586ef895d
+[I 2026-09-09 11:25:51.116 ServerApp] Kernel restarted: 37915172-6fe8-4567-8369-d1e586ef895d
+[I 2026-09-09 11:25:51.119 ServerApp] Starting buffering for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[I 2026-09-09 11:25:51.122 ServerApp] Adapting from protocol version 5.3 (kernel 37915172-6fe8-4567-8369-d1e586ef895d) to 5.4 (client).
+[I 2026-09-09 11:25:51.123 ServerApp] Connecting to kernel 37915172-6fe8-4567-8369-d1e586ef895d.
+[I 2026-09-09 11:25:51.123 ServerApp] Restoring connection for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 11:34:54.347 ServerApp] Kernel interrupted: 37915172-6fe8-4567-8369-d1e586ef895d
+[W 2026-09-09 11:35:15.964 ServerApp] Wait for final termination of kernel timed out - continuing...
+[I 2026-09-09 11:35:16.037 ServerApp] Kernel restarted: 37915172-6fe8-4567-8369-d1e586ef895d
+[I 2026-09-09 11:35:16.040 ServerApp] Starting buffering for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[I 2026-09-09 11:35:16.046 ServerApp] Adapting from protocol version 5.3 (kernel 37915172-6fe8-4567-8369-d1e586ef895d) to 5.4 (client).
+[I 2026-09-09 11:35:16.046 ServerApp] Connecting to kernel 37915172-6fe8-4567-8369-d1e586ef895d.
+[I 2026-09-09 11:35:16.046 ServerApp] Restoring connection for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+Traceback (most recent call last):
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel_launcher.py", line 18, in <module>
+    app.launch_new_instance()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 1079, in launch_instance
+    app.initialize(argv)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 117, in inner
+    return method(app, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 760, in initialize
+    self.init_sockets()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 373, in init_sockets
+    self.shell_port = self._bind_socket(self.shell_socket, self.shell_port)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 280, in _bind_socket
+    return self._try_bind_socket(s, port)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 256, in _try_bind_socket
+    s.bind("tcp://%s:%i" % (self.ip, port))
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/zmq/sugar/socket.py", line 320, in bind
+    super().bind(addr)
+  File "zmq/backend/cython/_zmq.py", line 1009, in zmq.backend.cython._zmq.Socket.bind
+  File "zmq/backend/cython/_zmq.py", line 190, in zmq.backend.cython._zmq._check_rc
+zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:58903')
+[I 2026-09-09 11:35:19.029 ServerApp] AsyncIOLoopKernelRestarter: restarting kernel (1/5), keep random ports
+[W 2026-09-09 11:35:19.029 ServerApp] kernel 37915172-6fe8-4567-8369-d1e586ef895d restarted
+[I 2026-09-09 11:35:19.034 ServerApp] Starting buffering for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[I 2026-09-09 11:35:19.042 ServerApp] Adapting from protocol version 5.3 (kernel 37915172-6fe8-4567-8369-d1e586ef895d) to 5.4 (client).
+[I 2026-09-09 11:35:19.043 ServerApp] Connecting to kernel 37915172-6fe8-4567-8369-d1e586ef895d.
+[I 2026-09-09 11:35:19.043 ServerApp] Restoring connection for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+Traceback (most recent call last):
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/.local/share/uv/python/cpython-3.11.10-linux-x86_64-gnu/lib/python3.11/runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel_launcher.py", line 18, in <module>
+    app.launch_new_instance()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 1079, in launch_instance
+    app.initialize(argv)
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/traitlets/config/application.py", line 117, in inner
+    return method(app, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 760, in initialize
+    self.init_sockets()
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 373, in init_sockets
+    self.shell_port = self._bind_socket(self.shell_socket, self.shell_port)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 280, in _bind_socket
+    return self._try_bind_socket(s, port)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/ipykernel/kernelapp.py", line 256, in _try_bind_socket
+    s.bind("tcp://%s:%i" % (self.ip, port))
+  File "/nfs-share/pa511/code_bases/new_jac/.venv/lib/python3.11/site-packages/zmq/sugar/socket.py", line 320, in bind
+    super().bind(addr)
+  File "zmq/backend/cython/_zmq.py", line 1009, in zmq.backend.cython._zmq.Socket.bind
+  File "zmq/backend/cython/_zmq.py", line 190, in zmq.backend.cython._zmq._check_rc
+zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:58903')
+[I 2026-09-09 11:35:22.043 ServerApp] AsyncIOLoopKernelRestarter: restarting kernel (2/5), keep random ports
+[W 2026-09-09 11:35:22.044 ServerApp] kernel 37915172-6fe8-4567-8369-d1e586ef895d restarted
+[I 2026-09-09 11:35:22.047 ServerApp] Starting buffering for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[I 2026-09-09 11:35:22.069 ServerApp] Adapting from protocol version 5.3 (kernel 37915172-6fe8-4567-8369-d1e586ef895d) to 5.4 (client).
+[I 2026-09-09 11:35:22.079 ServerApp] Connecting to kernel 37915172-6fe8-4567-8369-d1e586ef895d.
+[I 2026-09-09 11:35:22.091 ServerApp] Restoring connection for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[I 2026-09-09 11:35:22.091 ServerApp] Starting buffering for 37915172-6fe8-4567-8369-d1e586ef895d:6eb92f7e-4c09-426b-b75e-47ad13de42f4
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[W 2026-09-09 11:35:22.423 ServerApp] 
+[W 2026-09-09 11:35:22.485 ServerApp] 
+[W 2026-09-09 11:35:22.486 ServerApp] 
+[W 2026-09-09 11:35:22.530 ServerApp] 
+[W 2026-09-09 11:35:22.531 ServerApp] 
+[I 2026-09-09 11:36:30.652 ServerApp] Kernel started: 062b8def-d535-4a5d-9c89-d4d37a483cb3
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 11:36:31.129 ServerApp] Adapting from protocol version 5.3 (kernel 062b8def-d535-4a5d-9c89-d4d37a483cb3) to 5.4 (client).
+[I 2026-09-09 11:36:31.130 ServerApp] Connecting to kernel 062b8def-d535-4a5d-9c89-d4d37a483cb3.
+[I 2026-09-09 11:47:42.539 ServerApp] Kernel interrupted: 062b8def-d535-4a5d-9c89-d4d37a483cb3
+[I 2026-09-09 11:47:57.701 ServerApp] Kernel restarted: 062b8def-d535-4a5d-9c89-d4d37a483cb3
+[I 2026-09-09 11:47:57.704 ServerApp] Starting buffering for 062b8def-d535-4a5d-9c89-d4d37a483cb3:17bbdb09-d006-4b4a-beff-f5c8b514c334
+[I 2026-09-09 11:47:57.709 ServerApp] Adapting from protocol version 5.3 (kernel 062b8def-d535-4a5d-9c89-d4d37a483cb3) to 5.4 (client).
+[I 2026-09-09 11:47:57.710 ServerApp] Connecting to kernel 062b8def-d535-4a5d-9c89-d4d37a483cb3.
+[I 2026-09-09 11:47:57.710 ServerApp] Restoring connection for 062b8def-d535-4a5d-9c89-d4d37a483cb3:17bbdb09-d006-4b4a-beff-f5c8b514c334
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 12:46:34.374 ServerApp] 302 GET / (@127.0.0.1) 0.52ms
+[W 2026-09-09 12:46:34.516 ServerApp] 404 GET /login? (4b97abd1f0194ac6911c42e3ad1ac0e8@127.0.0.1) 3.22ms referer=None
+[I 2026-09-09 12:50:52.998 ServerApp] Kernel started: 4f81e0a8-daf1-4b0a-b3c1-95c5c4f274ce
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 12:50:53.643 ServerApp] Adapting from protocol version 5.3 (kernel 4f81e0a8-daf1-4b0a-b3c1-95c5c4f274ce) to 5.4 (client).
+[I 2026-09-09 12:50:53.644 ServerApp] Connecting to kernel 4f81e0a8-daf1-4b0a-b3c1-95c5c4f274ce.
+[W 2026-09-09 12:50:54.341 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (92a767b0185d43f9bf134255da94bbd7@127.0.0.1) 2.49ms referer=None
+[W 2026-09-09 12:50:54.342 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (42ad09eff9284e658dff8e056c0ea0f6@127.0.0.1) 1.14ms referer=None
+[I 2026-09-09 12:51:30.939 ServerApp] Starting buffering for 062b8def-d535-4a5d-9c89-d4d37a483cb3:17bbdb09-d006-4b4a-beff-f5c8b514c334
+[I 2026-09-09 12:55:47.517 ServerApp] Starting buffering for 4f81e0a8-daf1-4b0a-b3c1-95c5c4f274ce:5b179b1f-f0af-4157-b964-5a769d738658
+[I 2026-09-09 12:56:07.222 ServerApp] 302 GET / (@127.0.0.1) 0.49ms
+[W 2026-09-09 12:56:07.376 ServerApp] 404 GET /login? (d08a96c5faa34299bdc67cc98c61ea54@127.0.0.1) 3.06ms referer=None
+[I 2026-09-09 13:06:40.120 ServerApp] Kernel started: add67989-81ca-4391-ba50-c6d7fd169bd7
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 13:06:40.764 ServerApp] Adapting from protocol version 5.3 (kernel add67989-81ca-4391-ba50-c6d7fd169bd7) to 5.4 (client).
+[I 2026-09-09 13:06:40.764 ServerApp] Connecting to kernel add67989-81ca-4391-ba50-c6d7fd169bd7.
+[W 2026-09-09 13:06:43.311 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (15d1fa3c75cc4247851a4d480a6bb049@127.0.0.1) 1.56ms referer=None
+[W 2026-09-09 13:06:43.312 ServerApp] 404 GET /nbextensions/jupyter-js-widgets/extension.js (e23459b2e1394064b064fb91196b5c82@127.0.0.1) 0.47ms referer=None
+[I 2026-09-09 13:07:18.732 ServerApp] Kernel interrupted: add67989-81ca-4391-ba50-c6d7fd169bd7
+[I 2026-09-09 13:07:39.440 ServerApp] Kernel restarted: add67989-81ca-4391-ba50-c6d7fd169bd7
+[I 2026-09-09 13:07:39.443 ServerApp] Starting buffering for add67989-81ca-4391-ba50-c6d7fd169bd7:84128f12-2fc0-4073-8b42-9590b231c3ef
+[I 2026-09-09 13:07:39.446 ServerApp] Adapting from protocol version 5.3 (kernel add67989-81ca-4391-ba50-c6d7fd169bd7) to 5.4 (client).
+[I 2026-09-09 13:07:39.446 ServerApp] Connecting to kernel add67989-81ca-4391-ba50-c6d7fd169bd7.
+[I 2026-09-09 13:07:39.446 ServerApp] Restoring connection for add67989-81ca-4391-ba50-c6d7fd169bd7:84128f12-2fc0-4073-8b42-9590b231c3ef
+[IPKernelApp] WARNING | Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text and is susceptible to eavesdropping. Use IPC transport or launch with kernel manager-provisioned CurveZMQ keys to enable transport encryption.
+[I 2026-09-09 13:36:12.686 ServerApp] Starting buffering for add67989-81ca-4391-ba50-c6d7fd169bd7:84128f12-2fc0-4073-8b42-9590b231c3ef
+[I 2026-09-09 13:58:08.764 ServerApp] 302 GET / (@127.0.0.1) 0.48ms
+[W 2026-09-09 13:58:08.826 ServerApp] 404 GET /login? (ca88d193152441069ff261872fbeb53a@127.0.0.1) 2.36ms referer=None
+[I 2026-09-09 13:58:09.688 ServerApp] Adapting from protocol version 5.3 (kernel add67989-81ca-4391-ba50-c6d7fd169bd7) to 5.4 (client).
+[I 2026-09-09 13:58:09.689 ServerApp] Connecting to kernel add67989-81ca-4391-ba50-c6d7fd169bd7.
+[I 2026-09-09 13:58:24.348 ServerApp] Starting buffering for add67989-81ca-4391-ba50-c6d7fd169bd7:69198c7a-2d68-4c80-b3f8-ebd246c1cef7
+[I 2026-09-09 14:43:11.700 ServerApp] 302 GET / (@127.0.0.1) 0.44ms
+[W 2026-09-09 14:43:11.790 ServerApp] 404 GET /login? (2695fcd695694c83a689a18d330edb53@127.0.0.1) 2.45ms referer=None
+[I 2026-09-09 15:20:33.738 ServerApp] 302 GET / (@127.0.0.1) 0.45ms
+[W 2026-09-09 15:20:33.798 ServerApp] 404 GET /login? (910da6b88f814b08b2b04696edd397c9@127.0.0.1) 2.10ms referer=None
+[I 2026-09-09 15:20:39.037 ServerApp] Adapting from protocol version 5.3 (kernel add67989-81ca-4391-ba50-c6d7fd169bd7) to 5.4 (client).
+[I 2026-09-09 15:20:39.038 ServerApp] Connecting to kernel add67989-81ca-4391-ba50-c6d7fd169bd7.
+[I 2026-09-09 15:30:28.169 ServerApp] 302 GET / (@127.0.0.1) 0.44ms
+[W 2026-09-09 15:30:28.247 ServerApp] 404 GET /login? (83a4a41bd155400a98d7bf42476dc232@127.0.0.1) 2.48ms referer=None
+[I 2026-09-09 15:30:50.408 ServerApp] 302 GET / (@127.0.0.1) 0.50ms
+[W 2026-09-09 15:30:50.721 ServerApp] 404 GET /login? (cbb6ff452daf460b93adeb4bef299b4b@127.0.0.1) 1.52ms referer=None
+[I 2026-09-09 15:33:58.470 ServerApp] Starting buffering for add67989-81ca-4391-ba50-c6d7fd169bd7:3a466750-92ac-48e7-84d6-78f555317bb9
+[I 2026-09-09 15:35:51.027 ServerApp] Adapting from protocol version 5.3 (kernel add67989-81ca-4391-ba50-c6d7fd169bd7) to 5.4 (client).
+[I 2026-09-09 15:35:51.028 ServerApp] Connecting to kernel add67989-81ca-4391-ba50-c6d7fd169bd7.
+[I 2026-09-09 15:39:26.737 ServerApp] Starting buffering for add67989-81ca-4391-ba50-c6d7fd169bd7:9a679a5f-30ba-48bd-9763-adf7a35dc956
+[I 2026-09-09 15:40:14.034 ServerApp] 302 GET / (@127.0.0.1) 0.53ms
+[W 2026-09-09 15:40:14.281 ServerApp] 404 GET /login? (86b13b096bba44cd9fbc88806fe9c72a@127.0.0.1) 2.55ms referer=None
+[I 2026-09-09 15:42:44.723 ServerApp] 302 GET / (@127.0.0.1) 0.49ms
+[W 2026-09-09 15:42:44.988 ServerApp] 404 GET /login? (c9008ee44b3f4a3d8f9c4d8fdba6d7dc@127.0.0.1) 2.99ms referer=None
+slurmstepd: error: *** JOB 55350 ON ruapehu CANCELLED AT 2026-09-09T15:51:16 ***
+[C 2026-09-09 15:51:16.486 ServerApp] received signal 15, stopping
+[I 2026-09-09 15:51:16.487 ServerApp] Shutting down 5 extensions
+[I 2026-09-09 15:51:16.487 ServerApp] Shutting down 5 kernels
+[I 2026-09-09 15:51:16.487 ServerApp] Kernel shutdown: 37915172-6fe8-4567-8369-d1e586ef895d
+[I 2026-09-09 15:51:16.488 ServerApp] Kernel shutdown: add67989-81ca-4391-ba50-c6d7fd169bd7
+[I 2026-09-09 15:51:16.488 ServerApp] Kernel shutdown: 4f81e0a8-daf1-4b0a-b3c1-95c5c4f274ce
+[I 2026-09-09 15:51:16.488 ServerApp] Kernel shutdown: 062b8def-d535-4a5d-9c89-d4d37a483cb3
+[I 2026-09-09 15:51:16.488 ServerApp] Kernel shutdown: d96a9a0d-a1f0-42fa-82ee-f9e2dd163035

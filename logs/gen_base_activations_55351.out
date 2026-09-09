@@ -1,0 +1,6 @@
+Job 55351 running on ruapehu.cl.cam.ac.uk, config configs/smoll_jac.toml
+base_seqs: (1000, 8)
+Base model already exists, skipping export -> onnx_models/smoll/base_model.onnx
+Extra outputs model already exists, skipping generation -> onnx_models/smoll/base_model_extra_outputs.onnx
+  0%|          | 0/32 [00:00<?, ?it/s]  3%|▎         | 1/32 [00:00<00:05,  6.11it/s] 44%|████▍     | 14/32 [00:00<00:00, 62.61it/s] 84%|████████▍ | 27/32 [00:00<00:00, 87.74it/s]100%|██████████| 32/32 [00:00<00:00, 77.58it/s]
+saved base_seqs + 9 activations to onnx_models/smoll/base_activations.h5

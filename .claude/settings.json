@@ -1,12 +1,14 @@
-{
-  "permissions": {
-    "allow": [
-      "Edit(/nfs-share/pa511/code_bases/new_jac/analyze/**)",
-      "Write(/nfs-share/pa511/code_bases/new_jac/analyze/**)"
-    ],
-    "deny": [
-      "Edit(*)",
-      "Write(*)"
-    ]
-  }
-}
+// {
+//   "permissions": {
+//     "allow": [
+//       "Edit(/nfs-share/pa511/code_bases/new_jac/analyze/**)",
+//       "Write(/nfs-share/pa511/code_bases/new_jac/analyze/**)"
+//     ],
+//     "deny": [
+//       "Edit(*)",
+//       "Write(*)"
+//     ]
+//   }
+// }
+
+{}

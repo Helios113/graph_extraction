@@ -53,9 +53,9 @@ def run_iobinding_cpu_input_gpu_output(
     session: onnxruntime.InferenceSession,
     input_name: str,
     input_array: npt.NDArray,
-    output_name: str,
+    output_names: list[str],
     device_id: int = 0,
-) -> torch.Tensor:
+) -> list[torch.Tensor]:
     """
     For host-side inputs (e.g. int64 token ids as plain numpy arrays).
     ORT copies the input host->device once internally; output stays
@@ -63,9 +63,9 @@ def run_iobinding_cpu_input_gpu_output(
     """
     io_binding = session.io_binding()
     io_binding.bind_cpu_input(input_name, input_array)
-    io_binding.bind_output(output_name, device_type="cuda", device_id=device_id)
+    for output_name in output_names:
+        io_binding.bind_output(output_name, device_type="cuda", device_id=device_id)
 
     session.run_with_iobinding(io_binding)
 
-    ort_output = io_binding.get_outputs()[0]
-    return torch.utils.dlpack.from_dlpack(ort_output._ortvalue.to_dlpack())
+    return [torch.utils.dlpack.from_dlpack(ort_output._ortvalue.to_dlpack()) for ort_output in io_binding.get_outputs()]

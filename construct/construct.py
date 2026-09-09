@@ -1,9 +1,12 @@
+import os
 from pathlib import Path
+
+import onnx
 
 from config import ModelConfig, SublayerConfig
 from construct.fs_utils import _strip_last_quantifier, exclusive_lock
 from construct.model_export import export_base_model
-from construct.pullback import generate_subgraph_pullback
+from construct.pullback import find_output_node, generate_subgraph_pullback
 from construct.subgraph_extract import extract_subgraph
 
 
@@ -64,6 +67,50 @@ def ensure_subgraphs(
     return paths
 
 
+def ensure_extra_outputs(
+    cfg: ModelConfig,
+    extra_outputs: list[str],
+    force: bool = False,
+) -> Path:
+    """Adds extra_outputs (names of intermediate tensors) as additional outputs on a copy of
+    the base model, without going through the sub-block extraction pipeline."""
+    output_path = cfg.dir / "base_model_extra_outputs.onnx"
+    lock_path = output_path.with_suffix(output_path.suffix + ".lock")
+    with exclusive_lock(lock_path):
+        if not force and output_path.exists():
+            print(
+                f"Extra outputs model already exists, skipping generation -> {output_path}",
+            )
+        else:
+            input_path = cfg.base_model_path
+            if os.path.getsize(input_path) > onnx.checker.MAXIMUM_PROTOBUF:
+                onnx.shape_inference.infer_shapes_path(
+                    str(input_path), str(output_path)
+                )
+                model = onnx.load(output_path)
+            else:
+                model = onnx.load(input_path, load_external_data=False)
+                model = onnx.shape_inference.infer_shapes(model)
+                base_dir = os.path.dirname(input_path)
+                onnx.load_external_data_for_model(model, base_dir)
+
+            existing_outputs = {vi.name for vi in model.graph.output}
+            for name in extra_outputs:
+                if name in existing_outputs:
+                    continue
+                vi = find_output_node(model, name)
+                new_output = vi.__class__()
+                new_output.CopyFrom(vi)
+                model.graph.output.append(new_output)
+
+            location = os.path.basename(output_path) + ".data"
+            onnx.save(model, output_path, save_as_external_data=True, location=location)
+            onnx.checker.check_model(output_path)
+            print(f"Extra outputs model generated -> {output_path}")
+
+    return output_path
+
+
 def ensure_subgraph_pullback(
     paths: list[tuple[Path, SublayerConfig]],
     force: bool = False,
@@ -72,7 +119,7 @@ def ensure_subgraph_pullback(
     """
     base_model_path -- if we want to extract jacobians from a subgraph without materialising it
     """
-    
+
     generated_paths = []
 
     for path, sublayer_conf in paths:
@@ -95,7 +142,7 @@ def ensure_subgraph_pullback(
             else:
                 # generated_paths.setdefault("gradient", []).append(pullback_path)
                 generated_paths.append(pullback_path)
-                
+
                 print(f"Subgraph pullbac already exist, skipping extraction -> {path}")
                 print(
                     f"Subgraph pullbac already exist, have not checked for optimizer -> {path}",

@@ -3,7 +3,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from config import InputSourceConfig  # add to imports at top
 import torch
-
+import tqdm
 
 def sample_ambient_points(
     batch: int,
@@ -224,53 +224,40 @@ def estimate_local_tangent_space_p_var(
     p: float = 0.95,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    neighbors: (B, K, D) tensor. E.g., (32, 5, 896).
+    neighbors: (K, D) tensor, where K is elements and D is d_model.
     p: Target variance fraction to explain (0.0 to 1.0).
     
     Returns:
-        tangent_basis: (B, max_k, D) padded tensor. Unneeded basis vectors are zeroed out.
-        k_per_sample: (B,) integer tensor indicating the exact number of components 
-                      used for each sample in the batch.
+        tangent_basis: (k, D) tensor. Only the required basis vectors are returned.
+        k: Scalar integer tensor indicating the exact number of components used.
     """
-    B, K, D = neighbors.shape
+    K, D = neighbors.shape
     
     # 1. Center the neighborhood points
-    local_mean = neighbors.mean(dim=1, keepdim=True)
+    local_mean = neighbors.mean(dim=0, keepdim=True)
     centered = neighbors - local_mean
 
-    # 2. Perform batched SVD
-    U, S, Vh = torch.linalg.svd(centered, full_matrices=False)
-
+    # 2. Perform SVD
+    U, S, Vh = torch.linalg.svd(centered.to(torch.float32), full_matrices=False)
+    if p == 1:
+        return Vh, Vh.shape[0]
     # 3. Calculate explained variance ratio
-    # Eigenvalues are proportional to squared singular values
     eigenvalues = S ** 2
     total_variance = eigenvalues.sum(dim=-1, keepdim=True)
     explained_variance_ratio = eigenvalues.cumsum(dim=-1) / total_variance
 
-    # 4. Determine number of components needed per sample to reach p
-    # mask is True where we haven't yet reached the threshold p
+    # 4. Determine number of components needed to reach p
     mask = explained_variance_ratio < p
     
     # The required index is the number of True values + 1
     # Max intrinsic dim is K-1 because centering removes 1 degree of freedom
-    k_per_sample = mask.sum(dim=-1) + 1
-    k_per_sample = torch.clamp(k_per_sample, max=K-1)
-
-    # 5. Extract and pad the basis
-    max_k = k_per_sample.max().item()
-    tangent_basis = Vh[:, :max_k, :]
-
-    # Create a boolean mask to zero out the padded basis vectors
-    # idx shape: (1, max_k)
-    idx = torch.arange(max_k, device=neighbors.device).unsqueeze(0)
-    # valid_mask shape: (B, max_k)
-    valid_mask = idx < k_per_sample.unsqueeze(1)
+    k = mask.sum() + 1
+    k = torch.clamp(k, max=K-1)
     
-    # Apply mask (B, max_k, 1) to the basis (B, max_k, D)
-    tangent_basis = tangent_basis * valid_mask.unsqueeze(2)
+    # 5. Extract the basis
+    tangent_basis = Vh[:k, :]
 
-    return tangent_basis, k_per_sample
-
+    return tangent_basis, k
 
 
 def sample_ball_in_subspace(basis, center, radius, n_samples, rng=None):
