@@ -1,24 +1,3 @@
-"""Run a perturbed vocabulary sweep through the model and save, per output
-sublayer, the d_model vector at the swept position only.
-
-For each of the first n_samples sequences in the base sequences h5 (see
-`scripts/tokenize_to_h5.py`), and for every sequence position, substitutes
-vocab_sample_size random vocab ids into that position (holding the other
-cfg.seq - 1 positions fixed at the original sequence's tokens), then runs all
-perturbed rows through the extra-outputs model. Streams straight to h5 (one
-output layer at a time) instead of buffering all layers x all rows in
-memory, since n_rows can be in the hundreds of thousands. Flushed every
---flush-every chunks so a crash/interrupt partway through still leaves a
-readable file with whatever rows made it in so far.
-
-Inputs are pulled from the remote store (see `upload.py`) if not already
-present locally, and the output is pushed there when finished (unless
---no-push is set).
-
-Usage:
-    uv run python -m scripts.generate_perturbed_sweep configs/smoll_jac.toml
-"""
-
 import argparse
 import os
 
@@ -40,12 +19,9 @@ DEVICE = torch.device("cuda")
 def build_perturbed_inputs(
     cfg,
     base_seqs: np.ndarray,
-    vocab_sample_size: int,
-    rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
-    """For every (sample, position) pair, substitute a random subsample of
-    the vocabulary into that position, holding the other cfg.seq - 1
-    positions fixed at the original sequence's tokens.
+    """For every (sample, position) pair, substitute every vocab id into
+    that position, holding the other cfg.seq - 1 positions fixed.
 
     Returns (perturbed_inputs, row_sample_idx, row_pos, row_vocab_id, n_rows)
     where perturbed_inputs has shape (n_chunks, cfg.batch, cfg.seq) (padded
@@ -53,27 +29,20 @@ def build_perturbed_inputs(
     arrays are indexed by unpadded row (length n_rows).
     """
     n_samples = base_seqs.shape[0]
+    vocab_ids = np.arange(cfg.vocab_size)  # (vocab_size,)
 
-    # vocab_samples[sample_idx, pos] = vocab_sample_size token ids drawn for
-    # that slot
-    vocab_samples = rng.integers(
-        0, cfg.vocab_size, size=(n_samples, cfg.seq, vocab_sample_size)
-    )
-
-    # perturbed[sample_idx, pos] has shape (vocab_sample_size, cfg.seq):
-    #   column `pos` = vocab_samples[sample_idx, pos], all other columns =
-    #   base_seqs[sample_idx]
+    # perturbed[sample_idx, pos] has shape (vocab_size, cfg.seq):
+    #   column `pos` = 0..vocab_size-1, all other columns = base_seqs[sample_idx]
     perturbed = np.broadcast_to(
         base_seqs[:, None, None, :],
-        (n_samples, cfg.seq, vocab_sample_size, cfg.seq),
+        (n_samples, cfg.seq, cfg.vocab_size, cfg.seq),
     ).copy()
     for pos in range(cfg.seq):
-        perturbed[:, pos, :, pos] = vocab_samples[:, pos, :]
+        perturbed[:, pos, :, pos] = vocab_ids  # broadcasts over n_samples
 
-    # flatten (sample, pos, vocab_sample) into rows, then chunk into
-    # (cfg.batch, cfg.seq) blocks for batched inference.
     perturbed_flat = perturbed.reshape(-1, cfg.seq)
     n_rows = perturbed_flat.shape[0]
+
     pad = (-n_rows) % cfg.batch
     if pad:
         perturbed_flat = np.concatenate(
@@ -81,14 +50,9 @@ def build_perturbed_inputs(
         )
     perturbed_inputs = perturbed_flat.reshape(-1, cfg.batch, cfg.seq)
 
-    # per-row annotation: which sample, which position was swept, which
-    # vocab id was substituted in -- recovered via the same
-    # (sample, pos, vocab_sample) ordering used to build `perturbed` (padding
-    # rows just repeat the last row).
-    row_sample_idx, row_pos, row_vocab_sample_idx = np.unravel_index(
-        np.arange(n_rows), (n_samples, cfg.seq, vocab_sample_size)
+    row_sample_idx, row_pos, row_vocab_id = np.unravel_index(
+        np.arange(n_rows), (n_samples, cfg.seq, cfg.vocab_size)
     )
-    row_vocab_id = vocab_samples[row_sample_idx, row_pos, row_vocab_sample_idx]
 
     return perturbed_inputs, row_sample_idx, row_pos, row_vocab_id, n_rows
 
@@ -107,7 +71,7 @@ def run_perturbed_sweep(
 
     rng = np.random.default_rng(seed)
     perturbed_inputs, row_sample_idx, row_pos, row_vocab_id, n_rows = (
-        build_perturbed_inputs(cfg, base_seqs, vocab_sample_size, rng)
+        build_perturbed_inputs(cfg, base_seqs)
     )
     print(perturbed_inputs.shape, "n_rows (unpadded):", n_rows)
 
@@ -163,6 +127,7 @@ def run_perturbed_sweep(
         row_start = 0
         for c in tqdm.tqdm(range(n_chunks)):
             token_ids = perturbed_inputs[c]  # (cfg.batch, cfg.seq)
+            # print(token_ids.shape)
             fx = run_iobinding_cpu_input_gpu_output(
                 out_sess,
                 out_input_names[0],
@@ -228,7 +193,7 @@ def main() -> None:
     parser.add_argument(
         "--n-samples",
         type=int,
-        default=100,
+        default=128,
         help="Number of base sequences (from the start of --base-seqs-h5) to perturb",
     )
     parser.add_argument(

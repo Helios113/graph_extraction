@@ -1,54 +1,3 @@
-"""Estimate the local tangent space of each sublayer's input manifold (from
-the perturbed sweep), sample points within that tangent space, run both the
-tangent-space center and each sampled point through the sublayer, and save
-the input-space / output-space displacement distances.
-
-For each sublayer in a reduced Jacobian config (e.g. `configs/smoll_jac.toml`),
-this loads the flat perturbed vectors at that sublayer's input layer from
-`scripts/generate_perturbed_sweep.py`'s output h5, and for every row: finds
-its k = d_model + 1 nearest neighbors, estimates a local tangent basis (full
-p=1 basis, i.e. plain PCA of the neighborhood) via `batch_full_tangent_basis`
-(rows processed in --rows-per-block-sized batches), and draws --n-samples
-points uniformly from a ball of --radius in that tangent subspace, centered
-on the row.
-
-Tangent bases are only needed transiently to draw samples from -- unlike
-`generate_manifold.ipynb`, this script never materializes or saves the full
-(n_rows, d_model, d_model) tangent_basis array (that blew a disk quota at
-~176 TiB uncompressed for the full sweep). Only the per-sample distances are
-kept.
-
-To actually run a sampled d_model vector through the sublayer's forward ONNX
-subgraph (which has a fixed (cfg.batch, cfg.seq, d_model) input shape, since
-the sublayer operates on a whole sequence, not an isolated vector), the
-sampled vector is substituted into the swept row's *base* sequence activation
-(loaded from `scripts/generate_base_activations.py`'s output h5, keyed by
-sample_idx) at the swept position, holding every other position fixed. The
-same substitution is done with the unperturbed tangent-space center point, as
-a paired baseline.
-
-For each sampled point this saves:
-  - input_distance: ||sample - center|| in the sublayer's input space
-  - output_distance: ||sublayer(sample) - sublayer(center)|| in its output
-    space
-plus the row's sample_idx / pos / vocab_id and the tangent basis rank k.
-
-Each sublayer is written to its own h5 file under --out-dir (named
-`{input}.{output}.h5`), flushed to disk every --flush-every blocks, and
-pushed to the remote store as soon as that layer finishes (unless --no-push
-is set) -- so a crash/interrupt partway through a multi-hour run leaves
-whatever layers completed already safely on disk and pushed, rather than
-losing everything to a single combined file/push at the very end. This
-mirrors `compute_base_jacobian_stats.py`'s per-layer-file-with-flush pattern
-and `generate_perturbed_sweep.py`'s push-on-completion, combined.
-
-Inputs are pulled from the remote store (see `upload.py`) if not already
-present locally.
-
-Usage:
-    uv run python -m scripts.generate_tangent_manifold_distances configs/smoll_jac.toml
-"""
-
 import argparse
 import os
 
@@ -320,7 +269,7 @@ def main() -> None:
     parser.add_argument(
         "--n-samples",
         type=int,
-        default=50,
+        default=1000,
         help="Number of points sampled from the tangent ball per sweep row",
     )
     parser.add_argument(

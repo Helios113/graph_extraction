@@ -1,17 +1,3 @@
-"""Collect activations at the original (unperturbed) sequences.
-
-For every sublayer in a reduced Jacobian config (e.g. `configs/smoll_jac.toml`),
-run the base sequences from the tokenized sequences h5 (see
-`scripts/tokenize_to_h5.py`) through the extra-outputs model and save each
-sublayer input's activation (plus the raw embeddings) to an h5 file.
-`compute_base_jacobian_stats.py` loads that h5 and computes the Jacobian
-singular-value statistics -- kept as a separate step since the activations
-are cheap to produce but the Jacobians are the expensive part.
-
-Usage:
-    uv run python -m scripts.generate_base_activations configs/smoll_jac.toml
-"""
-
 import argparse
 import os
 
@@ -47,10 +33,6 @@ def collect_activations(
 
     ensure_base_model(cfg, force=False, verbose=False)
 
-    # "embedding" is a valid intermediate tensor of the base graph (the
-    # lookup output feeding the first sublayer), so it can be read off the
-    # extra-outputs model in the same forward pass as every other
-    # activation -- no separate embedding-only session/subgraph needed.
     extra_outputs = sorted(
         {s.input for s in cfg.sublayers} | {s.output for s in cfg.sublayers}
     )
@@ -73,6 +55,9 @@ def collect_activations(
     # graph has a fixed batch dim of cfg.batch). Pad the last chunk by
     # repeating the final row, then trim the padding rows back off after.
     pad = (-n_samples) % cfg.batch
+    print(base_seqs.shape)
+    
+    # exit()
     padded_seqs = base_seqs
     if pad:
         padded_seqs = np.concatenate(

@@ -61,8 +61,26 @@ def run_iobinding_cpu_input_gpu_output(
     ORT copies the input host->device once internally; output stays
     GPU-resident as a torch tensor via dlpack.
     """
+    return run_iobinding_cpu_inputs_gpu_output(
+        session, {input_name: input_array}, output_names, device_id=device_id
+    )
+
+
+def run_iobinding_cpu_inputs_gpu_output(
+    session: onnxruntime.InferenceSession,
+    inputs: dict[str, npt.NDArray],
+    output_names: list[str],
+    device_id: int = 0,
+) -> list[torch.Tensor]:
+    """
+    Same as run_iobinding_cpu_input_gpu_output but for sessions that take
+    more than one host-side input (e.g. a data input plus a one-hot mask).
+    ORT copies each input host->device once internally; outputs stay
+    GPU-resident as torch tensors via dlpack.
+    """
     io_binding = session.io_binding()
-    io_binding.bind_cpu_input(input_name, input_array)
+    for name, array in inputs.items():
+        io_binding.bind_cpu_input(name, array)
     for output_name in output_names:
         io_binding.bind_output(output_name, device_type="cuda", device_id=device_id)
 

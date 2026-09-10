@@ -1,6 +1,20 @@
+import ml_dtypes
 import numpy as np
 import onnxruntime as ort
+import torch
 import tqdm
+
+from execute.io_onnx import run_iobinding_cpu_inputs_gpu_output
+
+
+def _gpu_to_mask_dtype_numpy(t: torch.Tensor, mask_dtype: np.dtype) -> np.ndarray:
+    """Move a GPU tensor to host as `mask_dtype`. bfloat16 needs the usual
+    uint16 bit-reinterpret roundtrip (torch bf16 tensors can't go through
+    .numpy() directly), matching scripts/generate_base_activations.py's
+    bf16_torch_to_numpy."""
+    if mask_dtype == ml_dtypes.bfloat16:
+        return t.contiguous().view(torch.uint16).cpu().numpy().view(ml_dtypes.bfloat16)
+    return t.cpu().numpy().astype(mask_dtype)
 
 
 def compute_jacobian(
@@ -100,29 +114,42 @@ def _compute_jacobian_diagonal_single(
     """
     input_data = np.broadcast_to(sample, (compute_batch, *sample.shape))
 
-    swept_positions = seq_positions if seq_positions is not None else range(y)
-    positions = [(s, d) for s in swept_positions for d in range(z)]
+    swept_positions = np.asarray(
+        list(seq_positions) if seq_positions is not None else range(y)
+    )
+    # positions[k] = (s, d) for the k'th sweep entry -- precomputed as arrays
+    # so each chunk's (s, d) pairs can be sliced and used for vectorized
+    # scatter/gather instead of a per-slot Python loop.
+    pos_s = np.repeat(swept_positions, z)
+    pos_d = np.tile(np.arange(z), swept_positions.shape[0])
+    n_positions = pos_s.shape[0]
+
     diagonal = np.empty((len(gradient_output_name), y, z, z), dtype=mask_dtype)
 
-    for chunk_start in range(0, len(positions), compute_batch):
-        chunk = positions[chunk_start : chunk_start + compute_batch]
+    for chunk_start in range(0, n_positions, compute_batch):
+        chunk_s = pos_s[chunk_start : chunk_start + compute_batch]
+        chunk_d = pos_d[chunk_start : chunk_start + compute_batch]
+        chunk_len = chunk_s.shape[0]
+        slots = np.arange(chunk_len)
 
         mask = np.zeros((compute_batch, y, z), dtype=mask_dtype)
-        for slot, (s, d) in enumerate(chunk):
-            mask[slot, s, d] = 1.0
+        mask[slots, chunk_s, chunk_d] = 1.0
 
         # Last chunk may be smaller than compute_batch; only feed as many
-        # broadcast input rows as there are mask slots in use.
-        outputs = session.run(
+        # broadcast input rows as there are mask slots in use. Keep outputs
+        # GPU-resident via IOBinding (avoids the host round-trip session.run
+        # does internally) and scatter directly with advanced indexing.
+        outputs = run_iobinding_cpu_inputs_gpu_output(
+            session,
+            {input_name: input_data[:chunk_len], mask_name: mask[:chunk_len]},
             gradient_output_name,
-            {
-                input_name: input_data[: len(chunk)],
-                mask_name: mask[: len(chunk)],
-            },
         )
-        for i in range(len(gradient_output_name)):
-            for slot, (s, d) in enumerate(chunk):
-                diagonal[i, s, d, :] = outputs[i][slot, s, :]
+        for i, output in enumerate(outputs):
+            # output: (chunk_len, y, z) on GPU -- gather each slot's swept
+            # row (s) and scatter to (chunk_s, chunk_d) in one shot instead
+            # of a per-slot Python loop.
+            gathered = output[slots, chunk_s, :]  # (chunk_len, z)
+            diagonal[i, chunk_s, chunk_d, :] = _gpu_to_mask_dtype_numpy(gathered, mask_dtype)
 
     return diagonal
 
