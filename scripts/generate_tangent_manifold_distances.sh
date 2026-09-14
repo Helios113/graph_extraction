@@ -18,4 +18,5 @@ CONFIG="${1:-configs/smoll_jac.toml}"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}"
 
-exec uv run python -m scripts.generate_tangent_manifold_distances "${CONFIG}"
+# exec uv run python -m scripts.generate_tangent_manifold_distances configs/smoll_jac_later_layers.toml --perturbed-sweep-h5 onnx_models/smoll/perturbed_sweep_small.h5 --base-activations-h5 onnx_models/smoll_small/base_activations.h5
+# exec uv run python -m scripts.generate_tangent_manifold_distances "${CONFIG}"

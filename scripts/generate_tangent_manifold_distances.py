@@ -137,15 +137,24 @@ def run_layer(
     rows_per_block: int,
     flush_every: int,
 ) -> None:
+    print("in run layer", flush=True)
     sweep_grp = sweep_h5f[sublayer_input]
-    flat = torch.from_numpy(sweep_grp["vec"][:]).to(DEVICE, torch.float32)
+    vec_ds = sweep_grp["vec"]
+    pinned = torch.empty(vec_ds.shape, dtype=torch.float32, pin_memory=True)
+    print("reading data", flush=True)
+   
+    vec_ds.read_direct(pinned.numpy())
+    print("moving to device", flush=True)
+    flat = pinned.to(DEVICE, non_blocking=True)
     row_sample_idx = sweep_grp["sample_idx"][:]
     row_pos = sweep_grp["pos"][:]
     row_vocab_id = sweep_grp["vocab_id"][:]
     d_model = flat.shape[1]
     n_rows = flat.shape[0]
 
+    print("doing knn", flush=True)
     kns = knn_gpu(flat, k=knn_k, query_block=query_batch)
+    print("knn done")
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
@@ -189,9 +198,11 @@ def run_layer(
         idx = np.arange(block_start, block_end)  # host-side: used only for h5/numpy slicing
         b = idx.shape[0]
 
-        # flat/kns already live on DEVICE -- slice with a contiguous device
-        # range directly (no host index tensor) to avoid an implicit H2D copy.
-        neighbor_idx = kns[1][block_start:block_end]  # (b, knn_k), on DEVICE
+        # kns[1] (neighbor indices) lives in pinned CPU memory -- knn_gpu
+        # keeps the full (n_rows, knn_k) index matrix off-GPU since at
+        # n_rows in the millions it wouldn't fit alongside `flat` and the
+        # rest of this loop's working set. Move just this block's slice over.
+        neighbor_idx = kns[1][block_start:block_end].to(DEVICE, non_blocking=True)
         neighbors = flat[neighbor_idx]  # (b, knn_k, d_model)
         basis = batch_full_tangent_basis(neighbors)  # (b, k, d_model)
         k = basis.shape[1]

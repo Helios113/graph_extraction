@@ -61,8 +61,8 @@ def main() -> None:
     cfg = load_config(args.config)
     seq_len = args.seq if args.seq is not None else cfg.seq
     out_path = Path(args.out) if args.out else Path("data") / f"{cfg.name}_sequences.h5"
-
-    sequences = tokenize_sequences(
+    print(f"getting {args.n} sequences of length {seq_len}")
+    sequences: np.ndarray[tuple[Any, ...], np.dtype[Any]] = tokenize_sequences(
         tokenizer_name=cfg.input_source.tokenizer,
         dataset=cfg.input_source.dataset,
         dataset_config=cfg.input_source.dataset_config,

@@ -18,4 +18,4 @@ CONFIG="${1:-configs/smoll_jac.toml}"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}"
 
-exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}"
+exec uv run python -m scripts.generate_perturbed_sweep_last configs/simple_stories.toml --base-seqs-h5 data/simple_stories.h5 --out onnx_models/simple_stories/perturbed_sweep_small.h5

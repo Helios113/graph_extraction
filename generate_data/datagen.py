@@ -148,7 +148,8 @@ def knn_gpu(
     k: int = 5,
     query_block: int = 4096,
     ref_block: int = 16384,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    return_distances: bool = False,
+) -> tuple[torch.Tensor | None, torch.Tensor]:
     """
     Computes brute-force exact k-NN using blockwise squared Euclidean distance
     and a running top-k merge.
@@ -158,10 +159,22 @@ def knn_gpu(
         k: Number of nearest neighbors to find.
         query_block: Chunk size for query points.
         ref_block: Chunk size for reference points.
+        return_distances: If True, also materialize the (N, k) distances
+            tensor on GPU. Off by default: most callers only need the
+            indices (e.g. to gather neighbor rows for a downstream
+            computation), and at N in the millions the (N, k) distances
+            tensor is itself tens of GB, so skipping it when unused matters.
 
     Returns:
-        distances: (N, k) tensor of Euclidean distances, sorted ascending.
-        indices: (N, k) tensor of neighbor indices.
+        distances: (N, k) tensor of Euclidean distances, sorted ascending,
+            on `points.device` -- or None if return_distances is False.
+        indices: (N, k) int32 tensor of neighbor indices, in pinned CPU
+            memory (not on `points.device`) -- kept off-GPU and in int32
+            (not int64) since at N in the millions the full (N, k) index
+            matrix is tens of GB and doesn't need to be GPU-resident or
+            8-byte-per-entry. Callers that need a block of it on-device
+            should slice the CPU tensor and move just that block over, e.g.
+            `indices[start:end].to(device)`.
     """
     N, _ = points.shape
     device = points.device
@@ -170,8 +183,13 @@ def knn_gpu(
     # Precompute squared norms for the distance formula: ||q||^2 + ||r||^2 - 2(q @ r.T)
     sq_norms = (points ** 2).sum(dim=1)
 
-    out_dist = torch.empty((N, k), dtype=dtype, device=device)
-    out_idx = torch.empty((N, k), dtype=torch.long, device=device)
+    out_dist = torch.empty((N, k), dtype=dtype, device=device) if return_distances else None
+    # int32 (not int64): out_idx is (N, k) and can be tens of GB in pinned
+    # host memory at N/k in the millions -- int32 halves that, and N fits
+    # comfortably under int32's ~2.1B range for any sweep size this repo
+    # produces.
+    assert N < 2**31, f"N={N} too large for int32 neighbor indices"
+    out_idx = torch.empty((N, k), dtype=torch.int32, pin_memory=True)
 
     for q_start in range(0, N, query_block):
         q_end = min(q_start + query_block, N)
@@ -187,7 +205,7 @@ def knn_gpu(
 
             # 1. Compute pairwise squared distances for current blocks
             d2 = q_sq + ref_sq - 2.0 * (q @ ref.T)
-            d2.clamp_min_(0.0) 
+            d2.clamp_min_(0.0)
 
             # 2. Find local top-k for the reference block
             chunk_k = min(k, ref_end - ref_start)
@@ -203,7 +221,7 @@ def knn_gpu(
             else:
                 merged_dist = torch.cat([best_dist, chunk_dist], dim=1)
                 merged_idx = torch.cat([best_idx, chunk_global_idx], dim=1)
-                
+
                 take_k = min(k, merged_dist.shape[1])
                 best_dist, sel = torch.topk(
                     merged_dist, take_k, dim=1, largest=False, sorted=True
@@ -211,8 +229,9 @@ def knn_gpu(
                 best_idx = torch.gather(merged_idx, 1, sel)
 
         # Convert squared distances to Euclidean distances
-        out_dist[q_start:q_end] = best_dist.sqrt()
-        out_idx[q_start:q_end] = best_idx
+        if out_dist is not None:
+            out_dist[q_start:q_end] = best_dist.sqrt()
+        out_idx[q_start:q_end] = best_idx.to(torch.int32).to("cpu", non_blocking=True)
 
     return out_dist, out_idx
 

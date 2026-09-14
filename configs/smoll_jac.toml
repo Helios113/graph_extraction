@@ -13,29 +13,29 @@ dataset_config = "wikitext-2-raw-v1"
 split = "train"
 text_column = "text"
 
-[[sublayers]]
-input = "embedding"
-output = "add_6"
-loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 960]
+# [[sublayers]]
+# input = "embedding"
+# output = "add_6"
+# loss_type = "MaskedSumLoss"
+# input_shape = [32, 8, 960]
 
-[[sublayers]]
-input = "add_6"
-output = "add_8"
-loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 960]
+# [[sublayers]]
+# input = "add_6"
+# output = "add_8"
+# loss_type = "MaskedSumLoss"
+# input_shape = [32, 8, 960]
 
-[[sublayers]]
-input = "add_102"
-output = "add_104"
-loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 960]
+# [[sublayers]]
+# input = "add_102"
+# output = "add_104"
+# loss_type = "MaskedSumLoss"
+# input_shape = [32, 8, 960]
 
-[[sublayers]]
-input = "add_104"
-output = "add_108"
-loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 960]
+# [[sublayers]]
+# input = "add_104"
+# output = "add_108"
+# loss_type = "MaskedSumLoss"
+# input_shape = [32, 8, 960]
 
 [[sublayers]]
 input = "add_188"
