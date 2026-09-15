@@ -3,7 +3,7 @@ model = "openai-community/gpt2"   # HF model id, passed to AutoModelForCausalLM.
 input_name = "input_ids"
 vocab_size = 50257
 batch = 32                   # Jacobian one-hot sweep is chunked in batches of this size
-seq = 8
+seq = 4
 d_model = 768
 
 [input_source]
@@ -18,80 +18,152 @@ text_column = "text"
 input = "input_ids"
 output = "add_1"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_1"
+output = "add_4"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_4"
 output = "add_7"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_7"
+output = "add_8"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_8"
 output = "add_11"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_11"
+output = "add_12"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_12"
 output = "add_15"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_15"
+output = "add_18"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_18"
 output = "add_19"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_19"
+output = "add_22"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_22"
 output = "add_23"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_23"
+output = "add_26"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_26"
 output = "add_27"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_27"
+output = "add_30"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_30"
 output = "add_31"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_31"
+output = "add_34"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_34"
 output = "add_35"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_35"
+output = "add_38"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_38"
 output = "add_39"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_39"
+output = "add_42"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_42"
 output = "add_43"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_43"
+output = "add_46"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_46"
 output = "add_47"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_47"
+output = "add_50"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 4, 3072]
+
+[[sublayers]]
+input = "add_50"
 output = "add_51"
 loss_type = "MaskedSumLoss"
-input_shape = [32, 8, 768]
+input_shape = [32, 4, 768]
 
 [batch_by_node]
-mauao = 35752
+mauao = 25026
 ruapehu = 85944

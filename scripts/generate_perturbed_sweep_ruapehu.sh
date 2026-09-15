@@ -21,4 +21,4 @@ export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NEW_JAC_SCRATCH}"
 
-exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}" --base-seqs-h5 "data/${NAME}" --out-dir "onnx_models/${NAME}/perturbed_sweep"
+exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}" --base-seqs-h5 "data/${NAME}" --out-dir "onnx_models/${NAME}/perturbed_sweep" --n-vocab-sample 10000 --upload-workers 8

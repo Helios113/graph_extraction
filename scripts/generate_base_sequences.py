@@ -34,6 +34,7 @@ def tokenize_and_save_sequences(
     shard_rows: int,
     flush_every: int,
     no_push: bool,
+    overwrite_remote: bool = False,
 ) -> None:
     writer = ShardedLayerWriter(
         layer_key=out_key,
@@ -43,6 +44,7 @@ def tokenize_and_save_sequences(
         flush_every=flush_every,
         attrs={"n": n, "seq_len": seq_len},
         no_push=no_push,
+        force_push=overwrite_remote,
         project_root=".",
     )
     if writer.next_row >= n:
@@ -125,6 +127,14 @@ def main() -> None:
         action="store_true",
         help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
+    parser.add_argument(
+        "--overwrite-remote",
+        action="store_true",
+        help="Overwrite the remote store's version of each shard unconditionally on a content "
+        "conflict, instead of prompting (or, non-interactively, deferring to `upload.py "
+        "apply-overrides`). Use after --overwrite when a prior run already pushed stale "
+        "content for this --out-key.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -144,6 +154,7 @@ def main() -> None:
         shard_rows=args.shard_rows,
         flush_every=args.flush_every,
         no_push=args.no_push,
+        overwrite_remote=args.overwrite_remote,
     )
     print(f"saved {args.n} tokenized sequences to {out_key}")
 

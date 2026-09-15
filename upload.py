@@ -473,11 +473,16 @@ def _push_file(local_path, config, force=False, virtual_path=None):
     return local_path, True
 
 
-def cmd_push(local_path, config, auto_delete=False, virtual_path=None):
+def cmd_push(local_path, config, auto_delete=False, virtual_path=None, force=False):
     """`virtual_path` (single-file push only -- ignored for a directory,
     since a dir push derives each file's project-relative path by walking)
     lets `local_path` be a file outside PROJECT_ROOT that should register in
-    the pointer/remote index at the given project-relative path instead."""
+    the pointer/remote index at the given project-relative path instead.
+
+    `force`: skip the remote-conflict check and overwrite the remote version
+    unconditionally -- see _push_file. Used when the caller already knows
+    the local version should win (e.g. --overwrite-remote on a script that
+    regenerated its output from scratch)."""
     if not os.path.exists(local_path):
         sys.exit(f"Path does not exist: {local_path}")
 
@@ -500,7 +505,7 @@ def cmd_push(local_path, config, auto_delete=False, virtual_path=None):
 
     uploaded, skipped = [], []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_push_file, f, config, virtual_path=virtual_path): f for f in files}
+        futures = {pool.submit(_push_file, f, config, force=force, virtual_path=virtual_path): f for f in files}
         for fut in as_completed(futures):
             path, ok = fut.result()
             (uploaded if ok else skipped).append(path)
@@ -971,13 +976,14 @@ def main():
 
     if cmd == "push":
         if len(sys.argv) < 3:
-            sys.exit("Usage: upload.py push [-y] <file|dir>")
+            sys.exit("Usage: upload.py push [-y] [-f] <file|dir>")
         args = sys.argv[2:]
         auto_delete = "-y" in args
-        args = [a for a in args if a != "-y"]
+        force = "-f" in args
+        args = [a for a in args if a not in ("-y", "-f")]
         if not args:
-            sys.exit("Usage: upload.py push [-y] <file|dir>")
-        cmd_push(args[0], config, auto_delete=auto_delete)
+            sys.exit("Usage: upload.py push [-y] [-f] <file|dir>")
+        cmd_push(args[0], config, auto_delete=auto_delete, force=force)
 
     elif cmd == "pull":
         if len(sys.argv) > 3:

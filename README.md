@@ -30,3 +30,22 @@ already exist.
 - `just notebook-headless [gpus]` — submit a headless Jupyter job via `sbatch`.
 - `just remote_tunnel [remote_port] [local_port]` — SSH-tunnel a remote port
   on `taranaki` to a local port.-->
+
+
+
+# preview what would be deleted
+uv run scripts/clean_corrupt_shards.py --dry-run
+
+# actually delete everything
+uv run scripts/clean_corrupt_shards.py
+
+# only default scratch root ($NEW_JAC_SCRATCH or /local/scratch/<user>/new_jac) is scanned;
+# override if needed:
+uv run scripts/clean_corrupt_shards.py --scratch-root /local/scratch/pa511/new_jac
+
+
+# mauao, CPU-only interactive shell
+srun --partition=ampere --nodelist=mauao --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash
+
+# ruapehu, CPU-only interactive shell
+srun --partition=hopper --nodelist=ruapehu --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash

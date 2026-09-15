@@ -14,6 +14,26 @@ from concurrent.futures import Future, ProcessPoolExecutor
 import upload
 
 
+def remote_exists(virtual_path: str, config: dict | None = None) -> bool:
+    """Cheap check (no download) for whether `virtual_path` has a pointer in
+    the remote index -- i.e. whether a prior push actually landed, as opposed
+    to trusting a local progress/manifest record that claims it did (e.g. if
+    the pushing process was killed between push() returning and the
+    progress write, or the remote store was reset after the push happened).
+    Does not verify the pointer's blob is still in the content-addressed
+    cache, only that the index entry exists."""
+    config = config or upload.load_config()
+    sftp = upload.open_sftp(config)
+    try:
+        remote_idx = upload.remote_index_path(config, virtual_path)
+        sftp.stat(remote_idx)
+        return True
+    except FileNotFoundError:
+        return False
+    finally:
+        sftp.close()
+
+
 def ensure_local(path: str, config: dict | None = None) -> str:
     """Make sure `path` exists locally, pulling it from the remote store if
     not. Returns `path` unchanged (for chaining). No-op if already present.
@@ -52,6 +72,7 @@ def push(
     config: dict | None = None,
     auto_delete: bool = True,
     virtual_path: str | None = None,
+    force: bool = False,
 ) -> None:
     """Push a local file to the remote store (content-addressed, dedup'd by
     hash -- safe to call even if an identical version is already there).
@@ -62,20 +83,26 @@ def push(
     should still show up in `upload.py ls` / be pullable at the path they'd
     occupy if they lived in the project, e.g.
     "onnx_models/smoll/tangent_manifold_distances/embedding.add_6/shard_00000.h5".
+
+    `force`: overwrite the remote version unconditionally instead of
+    prompting/deferring on a content conflict -- see upload.cmd_push. Use
+    when the caller knows the local version should win, e.g. a script
+    re-run with --overwrite-remote after its prior remote output is known
+    to be stale.
     """
     config = config or upload.load_config()
     print(f"[remote_storage] pushing {path!r} to remote store"
           + (f" as {virtual_path!r}" if virtual_path else "") + "...")
-    upload.cmd_push(path, config, auto_delete=auto_delete, virtual_path=virtual_path)
+    upload.cmd_push(path, config, auto_delete=auto_delete, virtual_path=virtual_path, force=force)
 
 
-def _push_worker(path: str, auto_delete: bool, virtual_path: str | None) -> None:
+def _push_worker(path: str, auto_delete: bool, virtual_path: str | None, force: bool) -> None:
     """Runs in a separate OS process (see AsyncPusher) -- `upload.cmd_push`
     stashes SFTP progress state in the `upload` module's `_board` global, so
     concurrent pushes must not share a process/interpreter, only a process
     pool. Re-loads its own config rather than pickling one across the
     process boundary."""
-    push(path, config=None, auto_delete=auto_delete, virtual_path=virtual_path)
+    push(path, config=None, auto_delete=auto_delete, virtual_path=virtual_path, force=force)
 
 
 class AsyncPusher:
@@ -96,13 +123,13 @@ class AsyncPusher:
         self._pool = ProcessPoolExecutor(max_workers=max_workers)
 
     def submit(
-        self, path: str, virtual_path: str | None = None, auto_delete: bool = True,
+        self, path: str, virtual_path: str | None = None, auto_delete: bool = True, force: bool = False,
     ) -> Future:
         """Non-blocking: hands `path` off to the process pool and returns
         immediately with a Future. Blocks only if every worker process is
         already busy (ProcessPoolExecutor queues in that case, which is the
         desired backpressure)."""
-        return self._pool.submit(_push_worker, path, auto_delete, virtual_path)
+        return self._pool.submit(_push_worker, path, auto_delete, virtual_path, force)
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=True)
