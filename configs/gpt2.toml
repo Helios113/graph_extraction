@@ -2,7 +2,7 @@ name = "gpt2"
 model = "openai-community/gpt2"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
 input_name = "input_ids"
 vocab_size = 50257
-batch = 32                   # Jacobian one-hot sweep is chunked in batches of this size
+batch = 25026                   # Jacobian one-hot sweep is chunked in batches of this size
 seq = 4
 d_model = 768
 

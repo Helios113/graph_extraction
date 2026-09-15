@@ -96,6 +96,17 @@ class ShardedLayerWriter:
     flush_every: int = 20
     attrs: dict = field(default_factory=dict)
     no_push: bool = False
+    defer_push: bool = False
+    """When True, shards are kept on local scratch disk as they're completed
+    during the compute loop (like `no_push`) instead of being uploaded
+    immediately -- but unlike `no_push`, `close()` then pushes every
+    deferred shard for this layer before returning, once that layer's
+    compute is done. Intended for nodes with generous local scratch (so
+    accumulating a whole layer's shards locally is fine) where avoiding
+    per-shard SFTP connections during the compute loop matters more than
+    incremental crash-safety: a crash before close() finishes loses every
+    deferred-but-not-yet-pushed shard for this layer, not just the
+    in-progress one. Ignored if `no_push` is also set."""
     force_push: bool = False
     """When True, shard uploads overwrite the remote version unconditionally
     on a content conflict instead of prompting/deferring -- see
@@ -105,16 +116,26 @@ class ShardedLayerWriter:
     project_root: str = "."
     pusher: AsyncPusher | None = None
     """Shared AsyncPusher to upload shards through without blocking the
-    caller's compute loop. When set, at most one of this writer's shards may
-    be uploading at a time -- starting a new shard first waits for the
-    previous one's upload to finish, so this writer never gets more than one
-    shard ahead of what's been pushed. `pusher` is typically shared across
-    every layer's writer in a run, so different layers' uploads still run
-    concurrently even though each layer is capped at one in flight. When
-    None (default), falls back to the old behavior: push() blocks inline."""
+    caller's compute loop. When set, at most `max_in_flight` of this writer's
+    shards may be uploading at a time -- starting a new shard first waits for
+    the oldest pending one to finish once that cap is hit, so this writer
+    never gets more than `max_in_flight` shards ahead of what's been pushed.
+    `pusher` is typically shared across every layer's writer in a run, so
+    different layers' uploads still run concurrently even though each layer
+    is capped individually. When None (default), falls back to the old
+    behavior: push() blocks inline."""
+    max_in_flight: int = 1
+    """Max number of this writer's own shard uploads allowed outstanding at
+    once (only relevant when `pusher` is set). Raise this if the sweep spends
+    a lot of time blocked waiting on uploads instead of computing -- but each
+    additional in-flight shard is another one of this layer's shard files
+    sitting on local scratch disk until its upload completes, and another
+    concurrent SFTP connection when many layers' writers hit this at once, so
+    weigh it against local scratch headroom and the remote store's
+    connection limits (see CLAUDE.md's SFTP timeout guidance)."""
 
     def __post_init__(self) -> None:
-        self._pending_upload = None  # (Future, shard dict) for this writer's one in-flight upload
+        self._pending_uploads: list = []  # [(Future, shard dict), ...], oldest first
         self.progress_path = _progress_path(self.project_root, self.layer_key)
         self._progress = self._load_progress()
         self.next_row = self._progress["next_row"]
@@ -171,14 +192,33 @@ class ShardedLayerWriter:
         candidate_usable = os.path.exists(candidate_path)
         if candidate_usable:
             try:
-                with h5py.File(candidate_path, "r"):
-                    pass
+                with h5py.File(candidate_path, "r") as h5f:
+                    row_start = h5f.attrs["row_start"]
             except OSError as e:
                 print(f"[sharded_writer] {self.layer_key}: in-progress shard "
                       f"{self._cur_shard_idx} on local scratch disk "
                       f"({candidate_path}) is corrupt ({e}) -- discarding it")
                 os.remove(candidate_path)
                 candidate_usable = False
+            else:
+                if row_start != self._cur_shard_start:
+                    # The file at this shard index exists but was written
+                    # for a different row range -- e.g. a leftover from an
+                    # earlier run of this same layer_key under a different
+                    # --shard-rows (local scratch on a SLURM node persists
+                    # across jobs, it's never scoped to a run id). Trusting
+                    # its row_start would desync it from what this run's
+                    # completed_shards says shard _cur_shard_idx should
+                    # cover, and _open_shard()'s later re-open would hit
+                    # this same mismatch as a hard assert instead. Discard
+                    # it now, the same as the corrupt/missing cases below.
+                    print(f"[sharded_writer] {self.layer_key}: in-progress shard "
+                          f"{self._cur_shard_idx} on local scratch disk "
+                          f"({candidate_path}) has row_start={row_start}, expected "
+                          f"{self._cur_shard_start} (stale file from a differently "
+                          "configured run?) -- discarding it")
+                    os.remove(candidate_path)
+                    candidate_usable = False
 
         if self.next_row > self._cur_shard_start and not candidate_usable:
             print(f"[sharded_writer] {self.layer_key}: in-progress shard "
@@ -241,18 +281,18 @@ class ShardedLayerWriter:
         }
 
     def _save_progress(self) -> None:
-        # If the previous shard's upload hasn't been confirmed yet (it's
-        # still in self._pending_upload), completed_shards doesn't include
-        # it -- so _cur_shard_start is where that unconfirmed shard ends /
-        # the new shard begins. Persisting self.next_row here, if it's
+        # If the oldest pending shard's upload hasn't been confirmed yet
+        # (it's still in self._pending_uploads), completed_shards doesn't
+        # include it -- so _cur_shard_start is where that unconfirmed shard
+        # ends / the new shard begins. Persisting self.next_row here, if it's
         # already past that point, would claim rows in the new shard are
         # safe to resume from while the shard before them is unrecorded --
         # exactly the torn state (next_row far ahead of completed_shards)
         # that breaks resume if the pending upload later fails. Cap what's
-        # written at _cur_shard_start until _wait_pending_upload() confirms
+        # written at _cur_shard_start until _wait_pending_uploads() confirms
         # it and this cap no longer applies.
         safe_next_row = self.next_row
-        if self._pending_upload is not None:
+        if self._pending_uploads:
             safe_next_row = min(safe_next_row, self._cur_shard_start)
         self._progress["next_row"] = safe_next_row
         self._progress["updated_at"] = time.time()
@@ -280,7 +320,7 @@ class ShardedLayerWriter:
             # touching the same scratch path).
             try:
                 h5f = h5py.File(self._cur_shard_path, "r+")
-                assert h5f.attrs["row_start"] == self._cur_shard_start
+                row_start = h5f.attrs["row_start"]
             except OSError as e:
                 raise OSError(
                     f"{self.layer_key}: shard {self._cur_shard_idx} at "
@@ -289,6 +329,16 @@ class ShardedLayerWriter:
                     "re-run to recompute this shard from row "
                     f"{self._cur_shard_start}"
                 ) from e
+            if row_start != self._cur_shard_start:
+                raise OSError(
+                    f"{self.layer_key}: shard {self._cur_shard_idx} at "
+                    f"{self._cur_shard_path} has row_start={row_start}, expected "
+                    f"{self._cur_shard_start}, even though it passed the startup "
+                    "check -- likely a stale file from a differently configured "
+                    "run reusing this layer_key on the same node's local scratch "
+                    "disk. Delete it manually and re-run to recompute this shard "
+                    f"from row {self._cur_shard_start}"
+                )
         else:
             h5f = h5py.File(self._cur_shard_path, "w")
             h5f.attrs["row_start"] = self._cur_shard_start
@@ -345,22 +395,28 @@ class ShardedLayerWriter:
 
         self._save_progress()
 
-    def _wait_pending_upload(self) -> None:
-        """Block until this writer's one allowed in-flight upload (if any)
-        finishes, then record it as completed in progress/manifest. Called
-        before starting a new shard (caps this writer at one shard ahead of
-        what's confirmed pushed) and from close() (nothing left to overlap
-        the final upload with)."""
-        if self._pending_upload is None:
+    def _wait_oldest_pending_upload(self) -> None:
+        """Block until this writer's single oldest pending upload finishes,
+        then record it as completed in progress/manifest. No-op if nothing
+        is pending."""
+        if not self._pending_uploads:
             return
-        future, shard_entry = self._pending_upload
+        future, shard_entry = self._pending_uploads.pop(0)
         future.result()  # raises if the upload failed -- surface it here, not silently
         print(f"[sharded_writer] {self.layer_key}: shard {shard_entry['shard_idx']} "
               f"(rows {shard_entry['row_start']}-{shard_entry['row_end']}) "
               "pushed to remote and deleted locally")
         self._progress["completed_shards"].append(shard_entry)
         self._save_progress()
-        self._pending_upload = None
+
+    def _wait_pending_uploads(self, keep: int = 0) -> None:
+        """Drain oldest-first until at most `keep` uploads remain pending.
+        Called before starting a new shard (caps this writer at
+        `max_in_flight` shards ahead of what's confirmed pushed, `keep =
+        max_in_flight - 1`) and from close() with `keep=0` (nothing left to
+        overlap the final upload with)."""
+        while len(self._pending_uploads) > keep:
+            self._wait_oldest_pending_upload()
 
     def _close_and_upload_shard(self) -> None:
         assert self._cur_h5 is not None and self._cur_shard_path is not None
@@ -379,7 +435,7 @@ class ShardedLayerWriter:
             "row_start": shard.row_start,
             "row_end": shard.row_end,
             "virtual_path": shard.virtual_path,
-            "pushed": not self.no_push,
+            "pushed": not (self.no_push or self.defer_push),
         }
 
         if self.no_push:
@@ -388,16 +444,23 @@ class ShardedLayerWriter:
                   "(--no-push)")
             self._progress["completed_shards"].append(shard_entry)
             self._save_progress()
+        elif self.defer_push:
+            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
+                  f"(rows {shard.row_start}-{shard.row_end}) kept locally at {self._cur_shard_path} "
+                  "(--defer-push, will upload once this layer's compute is done)")
+            self._progress["completed_shards"].append(shard_entry)
+            self._save_progress()
         elif self.pusher is not None:
-            # Wait for this writer's *previous* upload (if still running)
-            # before kicking off this one, so it never has more than one
-            # shard's worth of unpushed data in flight -- the compute loop
-            # keeps going in the meantime via the shared process pool.
-            self._wait_pending_upload()
+            # Wait for older pending uploads (if any) until at most
+            # max_in_flight - 1 remain, so this writer never gets more than
+            # max_in_flight shards ahead of what's confirmed pushed -- the
+            # compute loop keeps going in the meantime via the shared
+            # process pool.
+            self._wait_pending_uploads(keep=self.max_in_flight - 1)
             future = self.pusher.submit(
                 self._cur_shard_path, virtual_path=virtual_path, force=self.force_push,
             )
-            self._pending_upload = (future, shard_entry)
+            self._pending_uploads.append((future, shard_entry))
             print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
                   f"(rows {shard.row_start}-{shard.row_end}) queued for upload")
         else:
@@ -413,6 +476,45 @@ class ShardedLayerWriter:
         self._cur_shard_idx += 1
         self._cur_shard_start = self.next_row
 
+    def _push_deferred_shards(self) -> None:
+        """Upload every completed_shards entry still marked unpushed (i.e.
+        every shard written under --defer-push), in order, via `pusher` if
+        set (so they overlap each other up to max_in_flight) or inline
+        otherwise. Called from close() once this layer's compute loop is
+        entirely done."""
+        pending_local: list[tuple] = []  # [(Future, shard dict), ...] when using pusher
+        for shard_entry in self._progress["completed_shards"]:
+            if shard_entry["pushed"]:
+                continue
+            local_path = os.path.join(
+                self._scratch_dir, f"shard_{shard_entry['shard_idx']:05d}.h5"
+            )
+            if self.pusher is not None:
+                if len(pending_local) >= self.max_in_flight:
+                    future, done_entry = pending_local.pop(0)
+                    future.result()
+                    done_entry["pushed"] = True
+                    self._save_progress()
+                future = self.pusher.submit(
+                    local_path, virtual_path=shard_entry["virtual_path"], force=self.force_push,
+                )
+                pending_local.append((future, shard_entry))
+                print(f"[sharded_writer] {self.layer_key}: deferred shard "
+                      f"{shard_entry['shard_idx']} queued for upload")
+            else:
+                push(local_path, virtual_path=shard_entry["virtual_path"], force=self.force_push)
+                shard_entry["pushed"] = True
+                self._save_progress()
+                print(f"[sharded_writer] {self.layer_key}: deferred shard "
+                      f"{shard_entry['shard_idx']} pushed to remote and deleted locally")
+
+        for future, done_entry in pending_local:
+            future.result()
+            done_entry["pushed"] = True
+            self._save_progress()
+            print(f"[sharded_writer] {self.layer_key}: deferred shard "
+                  f"{done_entry['shard_idx']} pushed to remote and deleted locally")
+
     def close(self) -> None:
         """Flush/close+upload any partially-filled final shard (a shard
         doesn't have to be exactly shard_rows to be finished -- the last
@@ -427,7 +529,11 @@ class ShardedLayerWriter:
                     dset.resize(new_shape)
             self._close_and_upload_shard()
 
-        self._wait_pending_upload()
+        self._wait_pending_uploads(keep=0)
+
+        if self.defer_push and self.next_row >= self.n_rows:
+            self._push_deferred_shards()
+
         write_manifest(self.project_root, self.layer_key, self._progress)
 
         try:

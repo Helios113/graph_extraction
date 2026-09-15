@@ -145,7 +145,7 @@ def main() -> None:
     parser.add_argument(
         "--shard-rows",
         type=int,
-        default=100_000,
+        default=200_000,
         help="Rows (samples) per shard -- each shard is written to local scratch disk, "
         "then pushed to the remote store and deleted locally as soon as it's full",
     )

@@ -107,8 +107,10 @@ def run_perturbed_sweep(
     flush_every: int,
     shard_rows: int,
     no_push: bool = False,
+    defer_push: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
+    max_in_flight: int = 1,
     config_path: str | None = None,
     n_vocab_sample: int | None = None,
     vocab_sample_seed: int = 0,
@@ -140,8 +142,8 @@ def run_perturbed_sweep(
         try:
             _run_perturbed_sweep_once(
                 cfg, base_seqs, out_dir, n_samples, flush_every, shard_rows,
-                no_push=no_push, project_root=project_root, upload_workers=upload_workers,
-                vocab_ids=vocab_ids,
+                no_push=no_push, defer_push=defer_push, project_root=project_root,
+                upload_workers=upload_workers, max_in_flight=max_in_flight, vocab_ids=vocab_ids,
             )
             break
         except RuntimeError as e:
@@ -170,8 +172,10 @@ def _run_perturbed_sweep_once(
     flush_every: int,
     shard_rows: int,
     no_push: bool = False,
+    defer_push: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
+    max_in_flight: int = 1,
     vocab_ids: np.ndarray | None = None,
 ) -> None:
     base_seqs = base_seqs[:n_samples]
@@ -255,8 +259,10 @@ def _run_perturbed_sweep_once(
             attrs={"n_samples": n_samples, "seq": cfg.seq, "d_model": cfg.d_model,
                    "output_name": output_name},
             no_push=no_push,
+            defer_push=defer_push,
             project_root=project_root,
             pusher=pusher,
+            max_in_flight=max_in_flight,
         )
         for output_name in out_output_names
     }
@@ -373,7 +379,7 @@ def main() -> None:
     parser.add_argument(
         "--shard-rows",
         type=int,
-        default=1_000_000,
+        default=2_000_000,
         help="Rows per shard -- each shard is written to local scratch disk, "
         "then pushed to the remote store and deleted locally as soon as it's full",
     )
@@ -383,11 +389,33 @@ def main() -> None:
         help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
     parser.add_argument(
+        "--defer-push",
+        action="store_true",
+        help="Keep each layer's shards on local scratch disk while that layer is being "
+        "computed, then push all of them once that layer's compute loop finishes, instead "
+        "of pushing each shard as soon as it's full. Avoids per-shard SFTP connections "
+        "competing with the compute loop, at the cost of losing a whole layer's unpushed "
+        "shards (not just the in-progress one) if the job dies before that layer's close() "
+        "runs -- only use this on nodes with enough local scratch headroom to hold a full "
+        "layer's shards at once (e.g. mauao, not ruapehu -- see CLAUDE.md). Ignored if "
+        "--no-push is also set.",
+    )
+    parser.add_argument(
         "--upload-workers",
         type=int,
         default=4,
         help="Max number of shard uploads (across all layers) to run concurrently in "
         "separate processes, while the GPU sweep keeps computing",
+    )
+    parser.add_argument(
+        "--max-in-flight",
+        type=int,
+        default=1,
+        help="Max number of shard uploads a single layer's writer may have outstanding "
+        "at once before it blocks starting a new shard. Raising this can hide upload "
+        "latency behind more compute, but increases both local scratch usage (more "
+        "unpushed shards on disk per layer) and how many concurrent SFTP connections "
+        "can pile up across layers -- see CLAUDE.md's SFTP timeout guidance",
     )
     parser.add_argument(
         "--n-vocab-sample",
@@ -417,7 +445,9 @@ def main() -> None:
         flush_every=args.flush_every,
         shard_rows=args.shard_rows,
         no_push=args.no_push,
+        defer_push=args.defer_push,
         upload_workers=args.upload_workers,
+        max_in_flight=args.max_in_flight,
         config_path=args.config,
         n_vocab_sample=args.n_vocab_sample,
         vocab_sample_seed=args.vocab_sample_seed,
