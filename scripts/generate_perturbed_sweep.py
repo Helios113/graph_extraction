@@ -196,11 +196,6 @@ def _run_perturbed_sweep_once(
     ensure_base_model(cfg, force=stale_batch, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
     model_path = ensure_extra_outputs(cfg, extra_outputs, force=stale_batch)
-    # input_shape is (batch, seq, d_model) of the sublayer's OUTPUT tensor --
-    # not always cfg.d_model, e.g. GPT-2's MLP intermediate (c_fc) outputs
-    # are 4*d_model wide. Keyed by output name since that's what out_sess's
-    # outputs (and hence `writers` below) are indexed by.
-    d_model_by_output = {sublayer.output: sublayer.input_shape[2] for sublayer in cfg.sublayers}
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
@@ -250,14 +245,14 @@ def _run_perturbed_sweep_once(
             layer_key=os.path.join(out_dir, output_name),
             n_rows=n_rows,
             schema={
-                "vec": ((d_model_by_output[output_name],), "float32"),
+                "vec": ((cfg.d_model,), "float32"),
                 "sample_idx": ((), "int64"),
                 "pos": ((), "int64"),
                 "vocab_id": ((), "int64"),
             },
             shard_rows=shard_rows,
             flush_every=flush_every,
-            attrs={"n_samples": n_samples, "seq": cfg.seq, "d_model": d_model_by_output[output_name],
+            attrs={"n_samples": n_samples, "seq": cfg.seq, "d_model": cfg.d_model,
                    "output_name": output_name},
             no_push=no_push,
             project_root=project_root,

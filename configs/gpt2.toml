@@ -58,108 +58,108 @@ input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_15"
-output = "add_18"
+output = "add_16"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_18"
+input = "add_16"
 output = "add_19"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_19"
-output = "add_22"
+output = "add_20"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_22"
+input = "add_20"
 output = "add_23"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_23"
-output = "add_26"
+output = "add_24"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_26"
+input = "add_24"
 output = "add_27"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_27"
-output = "add_30"
+output = "add_28"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_30"
+input = "add_28"
 output = "add_31"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_31"
-output = "add_34"
+output = "add_32"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_34"
+input = "add_32"
 output = "add_35"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_35"
-output = "add_38"
+output = "add_36"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_38"
+input = "add_36"
 output = "add_39"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_39"
-output = "add_42"
+output = "add_40"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_42"
+input = "add_40"
 output = "add_43"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_43"
-output = "add_46"
+output = "add_44"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_46"
+input = "add_44"
 output = "add_47"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
 
 [[sublayers]]
 input = "add_47"
-output = "add_50"
+output = "add_48"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 3072]
 
 [[sublayers]]
-input = "add_50"
+input = "add_48"
 output = "add_51"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
