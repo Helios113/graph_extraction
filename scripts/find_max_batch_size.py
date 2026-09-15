@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import re
+import time
 
 import torch
 from transformers.models.auto import AutoModelForCausalLM
@@ -54,21 +55,34 @@ def _dummy_input(cfg, batch: int) -> torch.Tensor:
 
 def fits(model: torch.nn.Module, cfg, batch: int) -> bool:
     """True if a forward pass at this batch size completes without OOM."""
+    t0 = time.monotonic()
     try:
         with torch.no_grad():
             model(_dummy_input(cfg, batch))
         torch.cuda.synchronize()
-        return True
-    except torch.cuda.OutOfMemoryError:
-        return False
+        ok = True
+    except torch.cuda.OutOfMemoryError as e:
+        ok = False
+        print(f"[fits] batch={batch}: OOM ({type(e).__name__}: {e})", flush=True)
+    else:
+        print(f"[fits] batch={batch}: OK", flush=True)
     finally:
         torch.cuda.empty_cache()
+    free, total = torch.cuda.mem_get_info()
+    dt = time.monotonic() - t0
+    print(
+        f"[fits] batch={batch}: result={ok} time={dt:.1f}s "
+        f"free/total={free / 2**30:.2f}/{total / 2**30:.2f} GiB after empty_cache",
+        flush=True,
+    )
+    return ok
 
 
 def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: int = 1 << 16) -> int:
     """Doubles `batch` until it no longer fits (or max_batch is hit), then
     binary-searches the (last-good, first-bad) interval for the largest
     batch size that still fits."""
+    print(f"[find_max_batch_size] start={start} max_batch={max_batch}", flush=True)
     if not fits(model, cfg, start):
         raise RuntimeError(f"Model does not fit even at batch={start} (seq={cfg.seq})")
 
@@ -77,6 +91,7 @@ def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: 
     probe = start
     while probe <= max_batch:
         probe *= 2
+        print(f"[doubling] probe={probe} (lo={lo}, hi={hi})", flush=True)
         if fits(model, cfg, probe):
             lo = probe
         else:
@@ -84,16 +99,23 @@ def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: 
             break
 
     if hi is None:
-        print(f"warning: reached max_batch={max_batch} without hitting OOM")
+        print(f"warning: reached max_batch={max_batch} without hitting OOM", flush=True)
         return lo
 
+    print(f"[doubling done] bracket=({lo}, {hi})", flush=True)
+
+    n_iter = 0
     while hi - lo > 1:
+        n_iter += 1
         mid = (lo + hi) // 2
+        print(f"[bisect {n_iter}] lo={lo} hi={hi} mid={mid}", flush=True)
         if fits(model, cfg, mid):
             lo = mid
         else:
             hi = mid
+        print(f"[bisect {n_iter}] -> lo={lo} hi={hi}", flush=True)
 
+    print(f"[find_max_batch_size] converged: lo={lo} hi={hi} in {n_iter} bisection step(s)", flush=True)
     return lo
 
 

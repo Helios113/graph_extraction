@@ -55,6 +55,7 @@ def run_iobinding_cpu_input_gpu_output(
     input_array: npt.NDArray,
     output_names: list[str],
     device_id: int = 0,
+    io_binding: onnxruntime.IOBinding | None = None,
 ) -> list[torch.Tensor]:
     """
     For host-side inputs (e.g. int64 token ids as plain numpy arrays).
@@ -62,7 +63,7 @@ def run_iobinding_cpu_input_gpu_output(
     GPU-resident as a torch tensor via dlpack.
     """
     return run_iobinding_cpu_inputs_gpu_output(
-        session, {input_name: input_array}, output_names, device_id=device_id
+        session, {input_name: input_array}, output_names, device_id=device_id, io_binding=io_binding
     )
 
 
@@ -71,14 +72,24 @@ def run_iobinding_cpu_inputs_gpu_output(
     inputs: dict[str, npt.NDArray],
     output_names: list[str],
     device_id: int = 0,
+    io_binding: onnxruntime.IOBinding | None = None,
 ) -> list[torch.Tensor]:
     """
     Same as run_iobinding_cpu_input_gpu_output but for sessions that take
     more than one host-side input (e.g. a data input plus a one-hot mask).
     ORT copies each input host->device once internally; outputs stay
     GPU-resident as torch tensors via dlpack.
+
+    `io_binding`: pass a `session.io_binding()` created once by the caller
+    (e.g. in a hot loop making many calls against the same session) to reuse
+    it instead of allocating a new one every call -- its previous
+    input/output bindings are cleared first, so this is safe to call
+    repeatedly with different `inputs`/shapes. If omitted, a fresh one is
+    created and used only for this call, as before.
     """
-    io_binding = session.io_binding()
+    io_binding = io_binding or session.io_binding()
+    io_binding.clear_binding_inputs()
+    io_binding.clear_binding_outputs()
     for name, array in inputs.items():
         io_binding.bind_cpu_input(name, array)
     for output_name in output_names:

@@ -1,5 +1,7 @@
 import argparse
 import os
+import queue
+import threading
 
 import h5py
 import numpy as np
@@ -39,6 +41,45 @@ def build_chunk_rows(
     return token_ids, row_sample_idx, row_pos, row_vocab_id
 
 
+def _prefetch_chunk_rows(cfg, base_seqs: np.ndarray, chunk_bounds, prefetch: int = 2):
+    """Yields build_chunk_rows(cfg, base_seqs, row_start, row_end) for each
+    (row_start, row_end) in `chunk_bounds`, computed on a background thread
+    up to `prefetch` chunks ahead of what's been yielded so far.
+
+    build_chunk_rows is pure numpy/CPU work with no GPU or shared mutable
+    state involved, so it's safe to run on a worker thread while the main
+    thread is blocked in the GPU forward pass or writing the previous
+    chunk's output -- this keeps the CPU busy building chunk i+1's rows
+    instead of sitting idle for the whole GPU call + write of chunk i.
+    """
+    q: queue.Queue = queue.Queue(maxsize=prefetch)
+    _SENTINEL = object()
+
+    def _worker():
+        try:
+            for row_start, row_end in chunk_bounds:
+                result = build_chunk_rows(cfg, base_seqs, row_start, row_end)
+                q.put((row_start, row_end, result, None))
+        except Exception as e:  # surface the exception on the consumer side
+            q.put((None, None, None, e))
+        finally:
+            q.put(_SENTINEL)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    try:
+        while True:
+            item = q.get()
+            if item is _SENTINEL:
+                return
+            row_start, row_end, result, err = item
+            if err is not None:
+                raise err
+            yield row_start, row_end, result
+    finally:
+        thread.join()
+
+
 def run_perturbed_sweep(
     cfg,
     base_seqs: np.ndarray,
@@ -56,9 +97,9 @@ def run_perturbed_sweep(
     n_chunks = -(-n_rows // batch)  # ceil division
     print(f"n_rows: {n_rows}, n_chunks: {n_chunks} (batch={batch})")
 
-    ensure_base_model(cfg, force=False, verbose=False)
+    ensure_base_model(cfg, force=True, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
-    model_path = ensure_extra_outputs(cfg, extra_outputs, force=False)
+    model_path = ensure_extra_outputs(cfg, extra_outputs, force=True)
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
@@ -72,6 +113,12 @@ def run_perturbed_sweep(
     out_output_names = [o.name for o in out_sess.get_outputs()]
     out_input_names = [o.name for o in out_sess.get_inputs()]
     print(out_output_names, out_input_names)
+
+    # Reused across every chunk instead of allocating a new IOBinding per
+    # call (run_iobinding_cpu_input_gpu_output clears its prior bindings
+    # before rebinding, so this is safe across chunks with differing shapes,
+    # e.g. the final padded chunk).
+    io_binding = out_sess.io_binding()
 
     # original (unperturbed) sequences, indexed by sample_idx -- each row's
     # sample_idx (saved per layer below) points into this table, so the
@@ -112,16 +159,23 @@ def run_perturbed_sweep(
     # earliest, and each writer skips rows it already has.
     resume_row = min(w.next_row for w in writers.values())
 
-    for c in tqdm.tqdm(range(n_chunks)):
+    chunk_bounds = []
+    for c in range(n_chunks):
         row_start = c * batch
         row_end = min(row_start + batch, n_rows)
         if row_end <= resume_row:
             continue
-        valid = row_end - row_start
+        chunk_bounds.append((row_start, row_end))
 
-        token_ids, chunk_sample_idx, chunk_pos, chunk_vocab_id = build_chunk_rows(
-            cfg, base_seqs, row_start, row_end,
-        )
+    # build_chunk_rows for the next chunk(s) runs on a background thread
+    # while this chunk's GPU forward pass + output gather/write happen here,
+    # so the CPU-bound row construction is never on the critical path.
+    prefetched = _prefetch_chunk_rows(cfg, base_seqs, chunk_bounds)
+
+    for row_start, row_end, (token_ids, chunk_sample_idx, chunk_pos, chunk_vocab_id) in tqdm.tqdm(
+        prefetched, total=len(chunk_bounds),
+    ):
+        valid = row_end - row_start
         if valid < batch:
             # pad the last chunk up to batch by repeating the last row
             pad = batch - valid
@@ -134,6 +188,7 @@ def run_perturbed_sweep(
             out_input_names[0],
             token_ids,
             out_output_names,
+            io_binding=io_binding,
         )
 
         # gather the swept position's d_model vector for each row in the
