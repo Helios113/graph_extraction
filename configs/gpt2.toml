@@ -93,5 +93,5 @@ loss_type = "MaskedSumLoss"
 input_shape = [32, 8, 768]
 
 [batch_by_node]
-mauao = 28662
-ruapehu = 60409
+mauao = 35752
+ruapehu = 85944

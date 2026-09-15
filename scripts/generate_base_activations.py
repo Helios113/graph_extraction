@@ -53,13 +53,13 @@ def collect_and_save_activations(
     rather than redoing the whole pass."""
     n_samples = base_seqs.shape[0]
 
-    ensure_base_model(cfg, force=False, verbose=False)
+    ensure_base_model(cfg, force=True, verbose=False)
 
     extra_outputs = sorted(
         {s.input for s in cfg.sublayers} | {s.output for s in cfg.sublayers}
     )
 
-    extra_outputs_model_path = ensure_extra_outputs(cfg, extra_outputs, force=False)
+    extra_outputs_model_path = ensure_extra_outputs(cfg, extra_outputs, force=True)
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC

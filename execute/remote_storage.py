@@ -9,6 +9,7 @@ module imports it by path the same way `scripts/` modules import `config`.
 
 import json
 import os
+from concurrent.futures import Future, ProcessPoolExecutor
 
 import upload
 
@@ -66,3 +67,42 @@ def push(
     print(f"[remote_storage] pushing {path!r} to remote store"
           + (f" as {virtual_path!r}" if virtual_path else "") + "...")
     upload.cmd_push(path, config, auto_delete=auto_delete, virtual_path=virtual_path)
+
+
+def _push_worker(path: str, auto_delete: bool, virtual_path: str | None) -> None:
+    """Runs in a separate OS process (see AsyncPusher) -- `upload.cmd_push`
+    stashes SFTP progress state in the `upload` module's `_board` global, so
+    concurrent pushes must not share a process/interpreter, only a process
+    pool. Re-loads its own config rather than pickling one across the
+    process boundary."""
+    push(path, config=None, auto_delete=auto_delete, virtual_path=virtual_path)
+
+
+class AsyncPusher:
+    """Shared, bounded-concurrency uploader for shard files produced by
+    `ShardedLayerWriter`. Backed by a `ProcessPoolExecutor` (not threads --
+    `upload.cmd_push` relies on a module-global `_board` for progress
+    reporting, which concurrent threads in one interpreter would stomp on;
+    separate processes each get their own copy).
+
+    One `AsyncPusher` is meant to be shared across every layer's writer in a
+    run, so shards from several layers can be uploading at once -- each
+    writer separately caps how many of its *own* shards may be in flight
+    (see `ShardedLayerWriter`), so this pool's `max_workers` bounds total
+    upload concurrency across layers, not concurrency within a layer.
+    """
+
+    def __init__(self, max_workers: int = 4):
+        self._pool = ProcessPoolExecutor(max_workers=max_workers)
+
+    def submit(
+        self, path: str, virtual_path: str | None = None, auto_delete: bool = True,
+    ) -> Future:
+        """Non-blocking: hands `path` off to the process pool and returns
+        immediately with a Future. Blocks only if every worker process is
+        already busy (ProcessPoolExecutor queues in that case, which is the
+        desired backpressure)."""
+        return self._pool.submit(_push_worker, path, auto_delete, virtual_path)
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=True)

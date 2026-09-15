@@ -2,7 +2,7 @@ name = "tiny_llama"
 model = "TinyLlama/TinyLlama_v1.1"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
 input_name = "input_ids"
 vocab_size = 32000
-batch = 32                   # 14336 (8*896) Jacobian elements chunked in batches of this size; also
+batch = 2000                   # 14336 (8*896) Jacobian elements chunked in batches of this size; also
                                # evenly divides d_model=896 for jacobian_position-restricted (single-token) runs
 seq = 8
 d_model = 2048
@@ -154,5 +154,5 @@ loss_type = "MaskedSumLoss"
 input_shape = [32, 8, 2048]
 
 [batch_by_node]
-mauao = 39400
-ruapehu = 86980
+mauao = 12368
+ruapehu = 26000

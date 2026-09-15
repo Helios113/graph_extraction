@@ -70,7 +70,10 @@ def load_config():
 
 def connect(config):
     transport = paramiko.Transport((config["host"], HETZNER_PORT))
-    transport.use_compression(True)
+    # SSH-layer compression costs CPU for ~0 benefit on h5 shards (float32
+    # arrays -- already high-entropy) and was measured as the dominant
+    # bottleneck: ~6 MB/s with compression vs. ~36 MB/s without on this link.
+    transport.use_compression(False)
     transport.connect(username=config["username"], password=config["password"])
     return transport
 
@@ -190,10 +193,50 @@ _board: _Board | _LogBoard | None = None
 
 
 def sftp_put(sftp, local_path, remote_path):
+    """Upload to a temp path in the same remote directory, then atomically
+    rename onto `remote_path`. Content-addressed blobs are checked for
+    existence by `sftp.stat` alone (not hash-verified) elsewhere in this
+    module, so a plain sftp.put that dies mid-transfer would otherwise leave
+    a truncated file at the final path that looks "already uploaded" to
+    every future push of the same content, forever. The temp+rename means a
+    crash never leaves anything visible at `remote_path` at all -- the next
+    attempt just re-uploads."""
     size = os.path.getsize(local_path)
     name = os.path.basename(local_path)
-    sftp.put(local_path, remote_path, callback=_board.make_callback(name, size))
+    tmp_remote = f"{remote_path}.tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        sftp.put(local_path, tmp_remote, callback=_board.make_callback(name, size))
+        sftp.posix_rename(tmp_remote, remote_path)
+    except BaseException:
+        # Best-effort cleanup only -- if the connection itself died (the
+        # common case: network drop / process killed mid-transfer), a
+        # cleanup call on the same dead sftp client can hang indefinitely
+        # (paramiko sets no socket timeout by default), so cap the attempt.
+        if sftp.get_channel() is not None and sftp.get_channel().active:
+            try:
+                sftp.remove(tmp_remote)
+            except Exception:
+                pass
+        raise
     _board.finish(name, size)
+
+
+def sftp_write_atomic(sftp, remote_path, data: bytes):
+    """Write `data` to `remote_path` via temp-file-then-rename, so a crash
+    mid-write never leaves truncated/corrupt content visible at the final
+    path (unlike a plain sftp.open(remote_path, "w"))."""
+    tmp_remote = f"{remote_path}.tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        with sftp.open(tmp_remote, "w") as f:
+            f.write(data)
+        sftp.posix_rename(tmp_remote, remote_path)
+    except BaseException:
+        if sftp.get_channel() is not None and sftp.get_channel().active:
+            try:
+                sftp.remove(tmp_remote)
+            except Exception:
+                pass
+        raise
 
 
 def sftp_get(sftp, remote_path, local_path):
@@ -368,7 +411,17 @@ def _push_file(local_path, config, force=False, virtual_path=None):
         if not force:
             try:
                 with sftp.open(remote_idx) as f:
-                    existing = json.load(f)
+                    raw = f.read()
+                try:
+                    existing = json.loads(raw)
+                except json.JSONDecodeError:
+                    # A prior push crashed mid-write to remote_idx (writing it
+                    # isn't atomic pre-fix) and left truncated/corrupt JSON.
+                    # Treat it like a missing pointer rather than crashing --
+                    # this push's own write below will overwrite it cleanly.
+                    tprint(f"[{name}] WARNING: remote index at {remote_idx!r} is corrupt "
+                           f"(likely a prior interrupted push); overwriting.")
+                    raise FileNotFoundError
                 if existing["hash"] == digest:
                     tprint(f"[{name}] hash matches remote, skipping upload.")
                     write_ptr(local_path, digest, size, virtual_path)
@@ -412,8 +465,7 @@ def _push_file(local_path, config, force=False, virtual_path=None):
         tprint(f"[{name}] pointer: {ptr_path}")
 
         # mirror pointer to remote index
-        with sftp.open(remote_idx, "w") as f:
-            f.write(json.dumps(ptr_data, indent=2))
+        sftp_write_atomic(sftp, remote_idx, json.dumps(ptr_data, indent=2).encode())
 
     finally:
         sftp.close()

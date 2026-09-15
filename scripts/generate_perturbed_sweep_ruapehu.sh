@@ -15,9 +15,10 @@ mkdir -p logs
 cd /nfs-share/pa511/code_bases/new_jac
 
 CONFIG="${1:-configs/tiny_llama.toml}"
+NAME="$(basename "${CONFIG}" .toml)"
 
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NEW_JAC_SCRATCH}"
 
-exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}" --base-seqs-h5 data/simple_stories --out-dir onnx_models/tiny_llama/perturbed_sweep
+exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}" --base-seqs-h5 "data/${NAME}" --out-dir "onnx_models/${NAME}/perturbed_sweep"

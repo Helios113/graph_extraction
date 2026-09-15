@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 import h5py
 import numpy as np
 
-from execute.remote_storage import push
+from execute.remote_storage import AsyncPusher, push
 
 
 def _scratch_root() -> str:
@@ -97,8 +97,18 @@ class ShardedLayerWriter:
     attrs: dict = field(default_factory=dict)
     no_push: bool = False
     project_root: str = "."
+    pusher: AsyncPusher | None = None
+    """Shared AsyncPusher to upload shards through without blocking the
+    caller's compute loop. When set, at most one of this writer's shards may
+    be uploading at a time -- starting a new shard first waits for the
+    previous one's upload to finish, so this writer never gets more than one
+    shard ahead of what's been pushed. `pusher` is typically shared across
+    every layer's writer in a run, so different layers' uploads still run
+    concurrently even though each layer is capped at one in flight. When
+    None (default), falls back to the old behavior: push() blocks inline."""
 
     def __post_init__(self) -> None:
+        self._pending_upload = None  # (Future, shard dict) for this writer's one in-flight upload
         self.progress_path = _progress_path(self.project_root, self.layer_key)
         self._progress = self._load_progress()
         self.next_row = self._progress["next_row"]
@@ -242,6 +252,23 @@ class ShardedLayerWriter:
 
         self._save_progress()
 
+    def _wait_pending_upload(self) -> None:
+        """Block until this writer's one allowed in-flight upload (if any)
+        finishes, then record it as completed in progress/manifest. Called
+        before starting a new shard (caps this writer at one shard ahead of
+        what's confirmed pushed) and from close() (nothing left to overlap
+        the final upload with)."""
+        if self._pending_upload is None:
+            return
+        future, shard_entry = self._pending_upload
+        future.result()  # raises if the upload failed -- surface it here, not silently
+        print(f"[sharded_writer] {self.layer_key}: shard {shard_entry['shard_idx']} "
+              f"(rows {shard_entry['row_start']}-{shard_entry['row_end']}) "
+              "pushed to remote and deleted locally")
+        self._progress["completed_shards"].append(shard_entry)
+        self._save_progress()
+        self._pending_upload = None
+
     def _close_and_upload_shard(self) -> None:
         assert self._cur_h5 is not None and self._cur_shard_path is not None
         self._cur_h5.attrs["row_end"] = self.next_row
@@ -254,23 +281,36 @@ class ShardedLayerWriter:
             row_end=self.next_row,
             virtual_path=virtual_path,
         )
-        if not self.no_push:
-            push(self._cur_shard_path, virtual_path=virtual_path)  # auto_delete=True removes the local file on success
-            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
-                  f"(rows {shard.row_start}-{shard.row_end}) pushed to remote and deleted locally")
-        else:
-            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
-                  f"(rows {shard.row_start}-{shard.row_end}) kept locally at {self._cur_shard_path} "
-                  "(--no-push)")
-
-        self._progress["completed_shards"].append({
+        shard_entry = {
             "shard_idx": shard.shard_idx,
             "row_start": shard.row_start,
             "row_end": shard.row_end,
             "virtual_path": shard.virtual_path,
             "pushed": not self.no_push,
-        })
-        self._save_progress()
+        }
+
+        if self.no_push:
+            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
+                  f"(rows {shard.row_start}-{shard.row_end}) kept locally at {self._cur_shard_path} "
+                  "(--no-push)")
+            self._progress["completed_shards"].append(shard_entry)
+            self._save_progress()
+        elif self.pusher is not None:
+            # Wait for this writer's *previous* upload (if still running)
+            # before kicking off this one, so it never has more than one
+            # shard's worth of unpushed data in flight -- the compute loop
+            # keeps going in the meantime via the shared process pool.
+            self._wait_pending_upload()
+            future = self.pusher.submit(self._cur_shard_path, virtual_path=virtual_path)
+            self._pending_upload = (future, shard_entry)
+            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
+                  f"(rows {shard.row_start}-{shard.row_end}) queued for upload")
+        else:
+            push(self._cur_shard_path, virtual_path=virtual_path)  # auto_delete=True removes the local file on success
+            print(f"[sharded_writer] {self.layer_key}: shard {self._cur_shard_idx} "
+                  f"(rows {shard.row_start}-{shard.row_end}) pushed to remote and deleted locally")
+            self._progress["completed_shards"].append(shard_entry)
+            self._save_progress()
 
         self._cur_h5 = None
         self._cur_shard_path = None
@@ -291,6 +331,7 @@ class ShardedLayerWriter:
                     dset.resize(new_shape)
             self._close_and_upload_shard()
 
+        self._wait_pending_upload()
         write_manifest(self.project_root, self.layer_key, self._progress)
 
         try:

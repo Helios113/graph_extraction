@@ -9,8 +9,8 @@ from onnx.utils import Extractor
 def extract_subgraph(
     input_path: Path,
     output_path: Path,
-    input_names: str,
-    output_names: str,
+    input_names: str | list[str],
+    output_names: str | list[str],
     check_model: bool = True,
     infer_shapes: bool = True,
 ) -> None:
@@ -22,6 +22,9 @@ def extract_subgraph(
         raise ValueError("Input tensor names shall not be empty!")
     if not output_names:
         raise ValueError("Output tensor names shall not be empty!")
+
+    input_names = [input_names] if isinstance(input_names, str) else list(input_names)
+    output_names = [output_names] if isinstance(output_names, str) else list(output_names)
 
     if check_model:
         onnx.checker.check_model(input_path)
@@ -38,7 +41,7 @@ def extract_subgraph(
         model = onnx.load(input_path)
 
     e = Extractor(model)
-    extracted = e.extract_model([input_names], [output_names])
+    extracted = e.extract_model(input_names, output_names)
 
     location = os.path.basename(output_path) + ".data"
     onnx.save(extracted, output_path, save_as_external_data=True, location=location)

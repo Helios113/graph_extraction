@@ -11,8 +11,9 @@ import torch.utils.dlpack
 import tqdm
 
 from config import load_config
-from construct.construct import ensure_base_model, ensure_extra_outputs
+from construct.construct import ensure_base_model, ensure_extra_outputs, exported_batch_size
 from execute.io_onnx import run_iobinding_cpu_input_gpu_output
+from execute.remote_storage import AsyncPusher
 from execute.sharded_writer import ShardedLayerWriter, load_base_seqs
 
 DEVICE = torch.device("cuda")
@@ -89,6 +90,7 @@ def run_perturbed_sweep(
     shard_rows: int,
     no_push: bool = False,
     project_root: str = ".",
+    upload_workers: int = 4,
 ) -> None:
     base_seqs = base_seqs[:n_samples]
 
@@ -97,9 +99,20 @@ def run_perturbed_sweep(
     n_chunks = -(-n_rows // batch)  # ceil division
     print(f"n_rows: {n_rows}, n_chunks: {n_chunks} (batch={batch})")
 
-    ensure_base_model(cfg, force=True, verbose=False)
+    # Force a re-export if the cached base model was built for a different
+    # batch size than this node currently wants (e.g. cfg.batch_by_node was
+    # updated, or this is a different node's cache) -- otherwise reuse it,
+    # since re-exporting a multi-GB model on every invocation is wasteful.
+    cached_batch = exported_batch_size(cfg.base_model_path)
+    stale_batch = cached_batch != batch
+    if stale_batch:
+        print(
+            f"Cached base model batch size doesn't match cfg.batch_for_node() "
+            f"({cached_batch} != {batch}), forcing re-export",
+        )
+    ensure_base_model(cfg, force=stale_batch, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
-    model_path = ensure_extra_outputs(cfg, extra_outputs, force=True)
+    model_path = ensure_extra_outputs(cfg, extra_outputs, force=stale_batch)
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
@@ -110,6 +123,9 @@ def run_perturbed_sweep(
         sess_options=sess_options,
         providers=["CUDAExecutionProvider"],
     )
+    # No leading "output" (final logits) slot -- ensure_extra_outputs
+    # extracts a subgraph whose outputs are exactly extra_outputs, dropping
+    # the logits/lm_head computation entirely since nothing here reads it.
     out_output_names = [o.name for o in out_sess.get_outputs()]
     out_input_names = [o.name for o in out_sess.get_inputs()]
     print(out_output_names, out_input_names)
@@ -134,6 +150,13 @@ def run_perturbed_sweep(
             f.attrs["d_model"] = cfg.d_model
             f.create_dataset("base_seqs", data=base_seqs)
 
+    # Shared across every layer's writer below so their shard uploads run
+    # concurrently (bounded by upload_workers) instead of one at a time --
+    # each writer still caps itself at one of its own shards in flight, so
+    # the GPU loop is never more than one shard ahead of what's been pushed
+    # for a given layer.
+    pusher = None if no_push else AsyncPusher(max_workers=upload_workers)
+
     writers = {
         output_name: ShardedLayerWriter(
             layer_key=os.path.join(out_dir, output_name),
@@ -150,8 +173,9 @@ def run_perturbed_sweep(
                    "output_name": output_name},
             no_push=no_push,
             project_root=project_root,
+            pusher=pusher,
         )
-        for output_name in out_output_names[1:]
+        for output_name in out_output_names
     }
     # All layers advance through the same chunk loop in lockstep, but may
     # have reached different next_row values before a crash (e.g. one
@@ -195,10 +219,19 @@ def run_perturbed_sweep(
         # chunk
         batch_arange = np.arange(valid)
 
-        for i, output_name in enumerate(out_output_names[1:], start=1):
+        for i, output_name in enumerate(out_output_names):
             writer = writers[output_name]
             if row_end <= writer.next_row:
                 continue  # this layer already has this chunk from a prior run
+
+            # A chunk's boundaries come from the current --batch value, but
+            # writer.next_row was left off at some prior run's (possibly
+            # different) batch size, so it can fall strictly inside this
+            # chunk rather than exactly at row_start. Only the sub-slice from
+            # next_row onward is new for this layer -- write_rows requires
+            # row_start == next_row, so trim the skip offset off every
+            # per-row array before calling it.
+            skip = max(0, writer.next_row - row_start)
 
             layer_out = fx[i][:valid]  # (valid, cfg.seq, d_model)
             swept_vecs = (
@@ -210,15 +243,18 @@ def run_perturbed_sweep(
             )
 
             writer.write_rows(
-                row_start, row_end,
-                vec=swept_vecs,
-                sample_idx=chunk_sample_idx,
-                pos=chunk_pos,
-                vocab_id=chunk_vocab_id,
+                row_start + skip, row_end,
+                vec=swept_vecs[skip:],
+                sample_idx=chunk_sample_idx[skip:],
+                pos=chunk_pos[skip:],
+                vocab_id=chunk_vocab_id[skip:],
             )
 
     for output_name, writer in writers.items():
-        writer.close()
+        writer.close()  # waits for that layer's own last in-flight upload
+
+    if pusher is not None:
+        pusher.shutdown()
 
     print(f"Saved perturbed sweep outputs under {out_dir}")
 
@@ -263,6 +299,13 @@ def main() -> None:
         action="store_true",
         help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
+    parser.add_argument(
+        "--upload-workers",
+        type=int,
+        default=4,
+        help="Max number of shard uploads (across all layers) to run concurrently in "
+        "separate processes, while the GPU sweep keeps computing",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -278,6 +321,7 @@ def main() -> None:
         flush_every=args.flush_every,
         shard_rows=args.shard_rows,
         no_push=args.no_push,
+        upload_workers=args.upload_workers,
     )
 
 

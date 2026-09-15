@@ -14,8 +14,11 @@ mkdir -p logs
 
 cd /nfs-share/pa511/code_bases/new_jac
 
+CONFIG="${1:-configs/tiny_llama.toml}"
+NAME="$(basename "${CONFIG}" .toml)"
+
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
 
-echo "Job ${SLURM_JOB_ID} running on $(hostname), scratch ${NEW_JAC_SCRATCH}"
+echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NEW_JAC_SCRATCH}"
 
-exec uv run python -m scripts.generate_base_sequences configs/tiny_llama.toml --out-key data/simple_stories
+exec uv run python -m scripts.generate_base_sequences "${CONFIG}" --out-key "data/${NAME}"

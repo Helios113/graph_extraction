@@ -46,11 +46,19 @@ def _random_init(model: torch.nn.Module, seed: int) -> None:
 def export_base_model(
     cfg: ModelConfig,
     verbose,
+    model: torch.nn.Module | None = None,
 ):
+    """`model`: reuse an already-loaded (and already random-initted, if
+    applicable) model instead of loading `cfg.model` from HF fresh --
+    e.g. find_max_batch_size.py re-exports the same model at many candidate
+    batch sizes in one run, where reloading multi-GB weights from disk on
+    every single probe would dominate wall time for nothing, since only the
+    batch dim (baked into `dummy_input`'s shape) changes between exports."""
     cfg.dir.mkdir(parents=True, exist_ok=True)
-    model = _load_model(cfg.model)
-    if cfg.random_init:
-        _random_init(model, cfg.random_init_seed)
+    if model is None:
+        model = _load_model(cfg.model)
+        if cfg.random_init:
+            _random_init(model, cfg.random_init_seed)
     dummy_input = _dummy_input(cfg)
     if _needs_embeds_kwarg(cfg):
         args = ({"inputs_embeds": dummy_input},)

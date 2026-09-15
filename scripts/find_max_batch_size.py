@@ -9,17 +9,27 @@ batch dimension -- `construct/model_export.py` exports the base model with
 `dynamic_axes`, so the batch size is baked into the graph at export time
 rather than being a free runtime knob. Different nodes (e.g. mauao's A40 vs
 ruapehu's H100) fit different max batch sizes, hence `batch_for_node` and
-this script being node-aware. Re-exporting (and re-extracting every sublayer
-subgraph) at each candidate batch size to measure this directly would be
-slow and disk-heavy (~1GB+ of ONNX + external-data files per export).
+this script being node-aware.
 
-Instead, this loads the underlying HF model once in plain PyTorch (the same
-`from_pretrained` call `construct/model_export.py` uses, before it ever gets
-traced to ONNX) and binary-searches over batch size, running a real forward
-pass at `(batch, cfg.seq)` on GPU and catching CUDA OOM. This is fast (no
-export/extraction per candidate) and representative of how memory scales
-with batch size, though it won't exactly match ONNX Runtime's CUDA EP memory
-footprint for the same graph.
+This probes the *actual* ONNX Runtime graph the real workload runs --
+export_base_model + ensure_extra_outputs with every configured sublayer
+output requested, exactly like generate_perturbed_sweep.py /
+generate_base_activations.py -- rather than a plain PyTorch forward pass.
+That distinction matters: retaining every sublayer's activation
+simultaneously (and, before ensure_extra_outputs started truncating the
+graph, the unused final logits tensor too) has a different memory profile
+than a single forward pass computing only the final output, so a batch size
+measured against plain PyTorch can be too large for the real ONNX graph and
+OOM there (see the `node_linear_4` crash this replaced). Each candidate
+batch size needs its own export (batch is baked into the graph, no
+dynamic_axes), so this re-exports per probe under a disposable cfg.name
+("<name>_batch_probe_<node>") that's deleted after every probe -- slower
+per probe than a plain torch forward pass, but it measures the thing that
+actually has to fit. The HF model itself is loaded once, up front, and
+reused across every probe (export_base_model accepts a pre-loaded model)
+rather than reloaded from disk on each of the ~30 probes a full
+doubling+bisection search needs -- for a multi-GB model that reload cost
+alone would otherwise dominate wall time.
 
 Usage:
     uv run python -m scripts.find_max_batch_size configs/tiny_llama.toml
@@ -27,63 +37,106 @@ Usage:
 """
 
 import argparse
+import dataclasses
 import re
+import shutil
 import time
 
+import numpy as np
+import onnxruntime as ort
 import torch
-from transformers.models.auto import AutoModelForCausalLM
 
-from config import current_node_name, load_config
-
-DEVICE = torch.device("cuda")
-
-
-def _load_model(spec: str) -> torch.nn.Module:
-    model = AutoModelForCausalLM.from_pretrained(spec)
-    model.eval()
-    model.config.use_cache = False
-    return model.to(DEVICE)
+from config import ModelConfig, current_node_name, load_config
+from construct.construct import ensure_base_model, ensure_extra_outputs
+from construct.model_export import _load_model, _random_init
 
 
-def _dummy_input(cfg, batch: int) -> torch.Tensor:
-    if cfg.input_name == "input_ids":
-        return torch.randint(0, cfg.vocab_size, (batch, cfg.seq), device=DEVICE)
-    raise ValueError(
-        f"find_max_batch_size only supports input_name == 'input_ids', got {cfg.input_name!r}"
-    )
+def _probe_cfg(cfg: ModelConfig, node: str, batch: int) -> ModelConfig:
+    """A disposable copy of `cfg` pinned to `batch` on `node`, exporting
+    under its own onnx_models/<name>_batch_probe_<node>/... directory
+    (cfg.dir derives from cfg.name) so repeated probe exports never touch
+    the real cached export at onnx_models/<cfg.name>/..., and concurrent
+    finder runs on different nodes never contend for the same probe path."""
+    return dataclasses.replace(cfg, name=f"{cfg.name}_batch_probe_{node}", batch_by_node={node: batch})
 
 
-def fits(model: torch.nn.Module, cfg, batch: int) -> bool:
-    """True if a forward pass at this batch size completes without OOM."""
+def _is_oom_error(e: Exception) -> bool:
+    msg = str(e)
+    return "Failed to allocate memory" in msg or "OutOfMemoryError" in type(e).__name__
+
+
+def _load_probe_model(cfg: ModelConfig):
+    """Loads cfg.model from HF once, applying random_init the same way
+    export_base_model would -- the caller passes the result into every
+    fits() call for this search so the (potentially multi-GB) weights are
+    read from disk/HF exactly once rather than once per probe."""
+    model = _load_model(cfg.model)
+    if cfg.random_init:
+        _random_init(model, cfg.random_init_seed)
+    return model
+
+
+def fits(
+    cfg: ModelConfig, node: str, batch: int, extra_outputs: list[str], model,
+) -> bool:
+    """True if a forward pass at this batch size completes on the real
+    (extra-outputs) ONNX graph without OOM. Exports fresh at `batch` (the
+    graph's batch dim can't be changed after export) and always cleans up
+    the probe export directory afterward, success or failure.
+
+    `model`: already-loaded (see `_load_probe_model`), reused across every
+    probe instead of reloading `cfg.model` from HF on each one."""
+    probe = _probe_cfg(cfg, node, batch)
+    shutil.rmtree(probe.dir, ignore_errors=True)
     t0 = time.monotonic()
     try:
-        with torch.no_grad():
-            model(_dummy_input(cfg, batch))
-        torch.cuda.synchronize()
+        ensure_base_model(probe, force=True, verbose=False, model=model)
+        model_path = ensure_extra_outputs(probe, extra_outputs, force=True)
+
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+        sess_options.intra_op_num_threads = 8
+        sess = ort.InferenceSession(
+            str(model_path), sess_options=sess_options, providers=["CUDAExecutionProvider"],
+        )
+        input_name = sess.get_inputs()[0].name
+        output_names = [o.name for o in sess.get_outputs()]
+
+        io_binding = sess.io_binding()
+        dummy = np.random.randint(0, cfg.vocab_size, (batch, cfg.seq)).astype(np.int64)
+        io_binding.bind_cpu_input(input_name, dummy)
+        for name in output_names:
+            io_binding.bind_output(name, device_type="cuda", device_id=0)
+        sess.run_with_iobinding(io_binding)
         ok = True
-    except torch.cuda.OutOfMemoryError as e:
+    except RuntimeError as e:
+        if not _is_oom_error(e):
+            raise
         ok = False
-        print(f"[fits] batch={batch}: OOM ({type(e).__name__}: {e})", flush=True)
+        print(f"[fits] batch={batch}: OOM ({e})", flush=True)
     else:
         print(f"[fits] batch={batch}: OK", flush=True)
     finally:
-        torch.cuda.empty_cache()
-    free, total = torch.cuda.mem_get_info()
+        shutil.rmtree(probe.dir, ignore_errors=True)
+
     dt = time.monotonic() - t0
-    print(
-        f"[fits] batch={batch}: result={ok} time={dt:.1f}s "
-        f"free/total={free / 2**30:.2f}/{total / 2**30:.2f} GiB after empty_cache",
-        flush=True,
-    )
+    print(f"[fits] batch={batch}: result={ok} time={dt:.1f}s", flush=True)
     return ok
 
 
-def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: int = 1 << 16) -> int:
+def find_max_batch_size(
+    cfg: ModelConfig,
+    node: str,
+    extra_outputs: list[str],
+    model,
+    start: int = 1,
+    max_batch: int = 1 << 16,
+) -> int:
     """Doubles `batch` until it no longer fits (or max_batch is hit), then
     binary-searches the (last-good, first-bad) interval for the largest
-    batch size that still fits."""
+    batch size that still fits. `model`: see `_load_probe_model`."""
     print(f"[find_max_batch_size] start={start} max_batch={max_batch}", flush=True)
-    if not fits(model, cfg, start):
+    if not fits(cfg, node, start, extra_outputs, model):
         raise RuntimeError(f"Model does not fit even at batch={start} (seq={cfg.seq})")
 
     lo = start
@@ -92,7 +145,7 @@ def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: 
     while probe <= max_batch:
         probe *= 2
         print(f"[doubling] probe={probe} (lo={lo}, hi={hi})", flush=True)
-        if fits(model, cfg, probe):
+        if fits(cfg, node, probe, extra_outputs, model):
             lo = probe
         else:
             hi = probe
@@ -109,7 +162,7 @@ def find_max_batch_size(model: torch.nn.Module, cfg, start: int = 1, max_batch: 
         n_iter += 1
         mid = (lo + hi) // 2
         print(f"[bisect {n_iter}] lo={lo} hi={hi} mid={mid}", flush=True)
-        if fits(model, cfg, mid):
+        if fits(cfg, node, mid, extra_outputs, model):
             lo = mid
         else:
             hi = mid
@@ -167,7 +220,7 @@ def main() -> None:
     parser.add_argument(
         "--start-batch",
         type=int,
-        default=1,
+        default=5000,
         help="Smallest batch size to try (fails loudly if even this OOMs)",
     )
     parser.add_argument(
@@ -186,10 +239,26 @@ def main() -> None:
 
     cfg = load_config(args.config)
     node = current_node_name()
-    print(f"{cfg.name}: loading {cfg.model} (seq={cfg.seq}) onto {DEVICE} (node={node})")
-    model = _load_model(cfg.model)
+    extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
+    print(
+        f"{cfg.name}: probing {cfg.model} (seq={cfg.seq}, node={node}) "
+        f"with extra_outputs={extra_outputs}"
+    )
 
-    max_batch = find_max_batch_size(model, cfg, start=args.start_batch, max_batch=args.max_batch)
+    # A prior run killed mid-probe (SIGKILL/scancel can't be caught, so
+    # fits()'s own finally-block cleanup never ran) can leave this probe
+    # directory behind with a stale base_model_extra_outputs.onnx -- e.g.
+    # built by an older ensure_extra_outputs before a graph-shape change.
+    # Wipe it up front so this run never mistakes that leftover for its own.
+    stale_probe_dir = _probe_cfg(cfg, node, args.start_batch).dir
+    shutil.rmtree(stale_probe_dir, ignore_errors=True)
+
+    print(f"{cfg.name}: loading {cfg.model} once, reused across every probe", flush=True)
+    model = _load_probe_model(cfg)
+
+    max_batch = find_max_batch_size(
+        cfg, node, extra_outputs, model, start=args.start_batch, max_batch=args.max_batch,
+    )
 
     free, total = torch.cuda.mem_get_info()
     configured_batch = cfg.batch_for_node(node)
