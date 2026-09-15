@@ -1,21 +1,28 @@
 """Load sequences from HuggingFace using a ModelConfig's input_source and save
-them to an h5 file in tokenized form.
+them to a sharded h5 dataset in tokenized form.
+
+Tokenization is CPU-bound dataset iteration (no GPU), but for large --n this
+can still run long enough to be worth resuming rather than restarting: rows
+are written via a ShardedLayerWriter (one "layer" -- the whole output --
+sharded to local scratch disk, pushed to the remote store and deleted
+locally as each shard fills, with progress checkpointed on NFS), so a
+crash partway through resumes token-by-token from the last completed shard
+instead of re-tokenizing from scratch.
 
 Usage:
-    uv run generate_data/tokenize_to_h5.py configs/smoll.toml --n 1000 --seq 8 --out data/smoll_sequences.h5
+    uv run python -m scripts.generate_base_sequences configs/smoll.toml --n 1000 --seq 8 --out-key data/smoll_sequences
 """
 import argparse
-from pathlib import Path
 
-import h5py
 import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
 from config import load_config
+from execute.sharded_writer import ShardedLayerWriter
 
 
-def tokenize_sequences(
+def tokenize_and_save_sequences(
     tokenizer_name: str,
     dataset: str,
     dataset_config: str | None,
@@ -23,31 +30,69 @@ def tokenize_sequences(
     text_column: str,
     n: int,
     seq_len: int,
-) -> np.ndarray:
+    out_key: str,
+    shard_rows: int,
+    flush_every: int,
+    no_push: bool,
+) -> None:
+    writer = ShardedLayerWriter(
+        layer_key=out_key,
+        n_rows=n,
+        schema={"input_ids": ((seq_len,), "int64")},
+        shard_rows=shard_rows,
+        flush_every=flush_every,
+        attrs={"n": n, "seq_len": seq_len},
+        no_push=no_push,
+        project_root=".",
+    )
+    if writer.next_row >= n:
+        print(f"already complete ({writer.next_row}/{n} rows), nothing to do")
+        writer.close()
+        return
+
     ds = load_dataset(dataset, dataset_config, split=split)
     tok = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    rows: list[list[int]] = []
+    # Rows already written (from a prior run) must be skipped from the
+    # dataset iterator too, or a resume would re-tokenize the same examples
+    # into a *different* set of rows than a from-scratch run would have
+    # produced (the source dataset order is stable, so skipping the same
+    # count of already-accepted examples reproduces the original row set).
+    skip = writer.next_row
+    seen = 0
+    rows_batch: list[list[int]] = []
+    row_start = writer.next_row
+
+    def flush_batch(row_start: int, rows_batch: list[list[int]]) -> int:
+        if not rows_batch:
+            return row_start
+        chunk = np.asarray(rows_batch, dtype=np.int64)
+        writer.write_rows(row_start, row_start + len(rows_batch), input_ids=chunk)
+        return row_start + len(rows_batch)
+
     for example in ds:
-        if len(rows) >= n:
+        if writer.next_row + len(rows_batch) >= n:
             break
         encoded = tok.encode(example[text_column])
         if len(encoded) < seq_len:
             continue
-        rows.append(encoded[:seq_len])
+        if seen < skip:
+            seen += 1
+            continue
+        rows_batch.append(encoded[:seq_len])
+        if len(rows_batch) >= flush_every:
+            row_start = flush_batch(row_start, rows_batch)
+            rows_batch = []
 
-    if len(rows) < n:
+    row_start = flush_batch(row_start, rows_batch)
+
+    if writer.next_row < n:
+        writer.close()
         raise ValueError(
-            f"dataset only yielded {len(rows)} examples with >= {seq_len} tokens, need {n}"
+            f"dataset only yielded {writer.next_row} examples with >= {seq_len} tokens, need {n}"
         )
 
-    return np.asarray(rows, dtype=np.int64)
-
-
-def save_sequences(sequences: np.ndarray, out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(out_path, "w") as f:
-        f.create_dataset("input_ids", data=sequences)
+    writer.close()
 
 
 def main() -> None:
@@ -55,14 +100,39 @@ def main() -> None:
     parser.add_argument("config", type=str, help="Path to a toml ModelConfig")
     parser.add_argument("--n", type=int, default=1000, help="Number of sequences to load")
     parser.add_argument("--seq", type=int, default=None, help="Sequence length (defaults to cfg.seq)")
-    parser.add_argument("--out", type=str, default=None, help="Output h5 path")
+    parser.add_argument(
+        "--out-key",
+        type=str,
+        default=None,
+        help="Output layer key (project-relative path, no extension) -- "
+        "shards and progress/manifest JSON are written under this",
+    )
+    parser.add_argument(
+        "--shard-rows",
+        type=int,
+        default=100_000,
+        help="Rows (sequences) per shard -- each shard is written to local scratch disk, "
+        "then pushed to the remote store and deleted locally as soon as it's full",
+    )
+    parser.add_argument(
+        "--flush-every",
+        type=int,
+        default=1000,
+        help="Flush the current shard's h5 file to local scratch disk every this many rows",
+    )
+    parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Keep finished shards on local scratch disk instead of pushing to the remote store",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     seq_len = args.seq if args.seq is not None else cfg.seq
-    out_path = Path(args.out) if args.out else Path("data") / f"{cfg.name}_sequences.h5"
+    out_key = args.out_key or f"data/{cfg.name}_sequences"
     print(f"getting {args.n} sequences of length {seq_len}")
-    sequences: np.ndarray[tuple[Any, ...], np.dtype[Any]] = tokenize_sequences(
+
+    tokenize_and_save_sequences(
         tokenizer_name=cfg.input_source.tokenizer,
         dataset=cfg.input_source.dataset,
         dataset_config=cfg.input_source.dataset_config,
@@ -70,10 +140,12 @@ def main() -> None:
         text_column=cfg.input_source.text_column,
         n=args.n,
         seq_len=seq_len,
+        out_key=out_key,
+        shard_rows=args.shard_rows,
+        flush_every=args.flush_every,
+        no_push=args.no_push,
     )
-
-    save_sequences(sequences, out_path)
-    print(f"saved {sequences.shape} tokenized sequences to {out_path}")
+    print(f"saved {args.n} tokenized sequences to {out_key}")
 
 
 if __name__ == "__main__":

@@ -46,9 +46,23 @@ def ensure_local(path: str, config: dict | None = None) -> str:
     return path
 
 
-def push(path: str, config: dict | None = None, auto_delete: bool = False) -> None:
+def push(
+    path: str,
+    config: dict | None = None,
+    auto_delete: bool = True,
+    virtual_path: str | None = None,
+) -> None:
     """Push a local file to the remote store (content-addressed, dedup'd by
-    hash -- safe to call even if an identical version is already there)."""
+    hash -- safe to call even if an identical version is already there).
+
+    `virtual_path`: project-relative path to record in the pointer/remote
+    index instead of `path`'s real location relative to the project root --
+    for files written outside the repo (e.g. node-local scratch disk) that
+    should still show up in `upload.py ls` / be pullable at the path they'd
+    occupy if they lived in the project, e.g.
+    "onnx_models/smoll/tangent_manifold_distances/embedding.add_6/shard_00000.h5".
+    """
     config = config or upload.load_config()
-    print(f"[remote_storage] pushing {path!r} to remote store...")
-    upload.cmd_push(path, config, auto_delete=auto_delete)
+    print(f"[remote_storage] pushing {path!r} to remote store"
+          + (f" as {virtual_path!r}" if virtual_path else "") + "...")
+    upload.cmd_push(path, config, auto_delete=auto_delete, virtual_path=virtual_path)

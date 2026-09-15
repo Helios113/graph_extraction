@@ -14,8 +14,10 @@ mkdir -p logs
 
 cd /nfs-share/pa511/code_bases/new_jac
 
-CONFIG="${1:-configs/smoll_jac.toml}"
+CONFIG="${1:-configs/tiny_llama.toml}"
 
-echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}"
+export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
 
-exec uv run python -m scripts.generate_perturbed_sweep_last configs/simple_stories.toml --base-seqs-h5 data/simple_stories.h5 --out onnx_models/simple_stories/perturbed_sweep_small.h5
+echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NEW_JAC_SCRATCH}"
+
+exec uv run python -m scripts.generate_perturbed_sweep "${CONFIG}" --base-seqs-h5 data/simple_stories --out-dir onnx_models/tiny_llama/perturbed_sweep

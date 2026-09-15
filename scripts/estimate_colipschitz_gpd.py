@@ -33,7 +33,7 @@ values.
 
 Usage:
     uv run python -m scripts.estimate_colipschitz_gpd \\
-        onnx_models/smoll/jacobian_stats/*.h5
+        onnx_models/smoll/jacobian_stats
 """
 
 import argparse
@@ -41,7 +41,6 @@ import glob
 import json
 import os
 
-import h5py
 import matplotlib
 
 matplotlib.use("Agg")
@@ -49,10 +48,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import genpareto, norm
 
+from execute.sharded_writer import load_shard_rows
 
-def load_smallest_singular_values(path: str) -> np.ndarray:
-    with h5py.File(path, "r") as h5f:
-        sv = h5f["smallest_singular_value"][:]
+
+def discover_layer_keys(jacobian_stats_dir: str) -> list[str]:
+    """A layer's manifest lives at <out_dir>/<layer_name>.manifest.json
+    (scripts.compute_base_jacobian_stats' ShardedLayerWriter output) --
+    discover every layer under `jacobian_stats_dir` by globbing those."""
+    manifests = sorted(glob.glob(os.path.join(jacobian_stats_dir, "*.manifest.json")))
+    return [os.path.basename(p)[: -len(".manifest.json")] for p in manifests]
+
+
+def load_smallest_singular_values(project_root: str, layer_key: str) -> np.ndarray:
+    sv = load_shard_rows(project_root, layer_key, dataset_names=["smallest_singular_value"])[
+        "smallest_singular_value"
+    ]
     return sv.reshape(-1).astype(np.float64)
 
 
@@ -181,10 +191,10 @@ def plot_sigma_min(g: np.ndarray, layer_name: str, result: dict, out_path: str) 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "h5_paths",
-        nargs="+",
-        help="One or more jacobian-stats h5 files (glob patterns are expanded), "
-        "e.g. onnx_models/smoll/jacobian_stats/*.h5",
+        "jacobian_stats_dir",
+        type=str,
+        help="Output directory from scripts.compute_base_jacobian_stats "
+        "(one sharded output + manifest per layer), e.g. onnx_models/smoll/jacobian_stats",
     )
     parser.add_argument(
         "--threshold",
@@ -224,15 +234,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    paths: list[str] = []
-    for pattern in args.h5_paths:
-        matched = sorted(glob.glob(pattern))
-        paths.extend(matched if matched else [pattern])
+    layer_keys = discover_layer_keys(args.jacobian_stats_dir)
+    if not layer_keys:
+        raise SystemExit(f"no *.manifest.json found under {args.jacobian_stats_dir!r}")
 
     all_results = {}
-    for path in paths:
-        layer_name = os.path.splitext(os.path.basename(path))[0]
-        g = load_smallest_singular_values(path)
+    for layer_name in layer_keys:
+        layer_key = os.path.join(args.jacobian_stats_dir, layer_name)
+        g = load_smallest_singular_values(".", layer_key)
 
         result = fit_gpd_tail(
             g,
@@ -248,7 +257,7 @@ def main() -> None:
             plot_sigma_min(g, layer_name, result, plot_path)
             print(f"saved plot to {plot_path}")
 
-        print(f"\n=== {layer_name} ({path}) ===")
+        print(f"\n=== {layer_name} ({layer_key}) ===")
         print(f"  N = {result['n_samples']} samples, observed min g = {result['g_min_observed']:.6g}")
         print(
             f"  threshold u = {result['threshold']:.6g} "

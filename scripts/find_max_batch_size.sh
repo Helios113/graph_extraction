@@ -14,8 +14,8 @@ mkdir -p logs
 
 cd /nfs-share/pa511/code_bases/new_jac
 
-CONFIG="${1:-configs/smoll_jac.toml}"
+CONFIG="${1:-configs/tiny_llama.toml}"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}"
 
-exec uv run python -m scripts.find_max_batch_size "${CONFIG}"
+exec uv run python -m scripts.find_max_batch_size "${CONFIG}" --update-config

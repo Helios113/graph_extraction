@@ -1,8 +1,6 @@
 import argparse
 import os
 
-import h5py
-import ml_dtypes
 import numpy as np
 import onnxruntime as ort
 import torch
@@ -11,7 +9,7 @@ import tqdm
 from config import load_config
 from construct.construct import ensure_base_model, ensure_subgraphs
 from execute.io_onnx import run_iobinding_gpu
-from execute.remote_storage import ensure_local, push
+from execute.sharded_writer import ShardedLayerWriter, load_activations, load_shard_rows
 from generate_data.datagen import knn_gpu
 
 DEVICE = torch.device("cuda")
@@ -65,19 +63,6 @@ def sample_ball_in_tangent_basis_batch_gpu(
     return torch.bmm(local_points, basis) + center.unsqueeze(1)
 
 
-def load_base_activations(path: str) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Inverse of generate_base_activations.save_activations: activations
-    were stored as raw uint16 (h5py has no native bfloat16 type), so view
-    them back to ml_dtypes.bfloat16 here."""
-    with h5py.File(path, "r") as h5f:
-        base_seqs = h5f["base_seqs"][:]
-        activations = {
-            name: dset[:].view(ml_dtypes.bfloat16)
-            for name, dset in h5f["activations"].items()
-        }
-    return base_seqs, activations
-
-
 def run_sublayer_batch(
     sess: ort.InferenceSession,
     input_name: str,
@@ -122,13 +107,13 @@ def run_sublayer_batch(
 
 def run_layer(
     cfg,
-    sweep_h5f: h5py.File,
+    sweep_out_dir: str,
     base_seqs: np.ndarray,
     base_activations: dict[str, np.ndarray],
     sublayer_input: str,
     sublayer_output: str,
     subgraph_path: str,
-    out_grp: h5py.Group,
+    layer_key: str,
     n_samples: int,
     radius: float,
     knn_k: int,
@@ -136,19 +121,22 @@ def run_layer(
     seed: int,
     rows_per_block: int,
     flush_every: int,
+    shard_rows: int,
+    no_push: bool,
+    project_root: str,
 ) -> None:
     print("in run layer", flush=True)
-    sweep_grp = sweep_h5f[sublayer_input]
-    vec_ds = sweep_grp["vec"]
-    pinned = torch.empty(vec_ds.shape, dtype=torch.float32, pin_memory=True)
-    print("reading data", flush=True)
-   
-    vec_ds.read_direct(pinned.numpy())
+    print("reading sweep shards", flush=True)
+    sweep_data = load_shard_rows(
+        project_root, os.path.join(sweep_out_dir, sublayer_input),
+        dataset_names=["vec", "sample_idx", "pos", "vocab_id"],
+    )
+    pinned = torch.from_numpy(sweep_data["vec"]).pin_memory()
     print("moving to device", flush=True)
     flat = pinned.to(DEVICE, non_blocking=True)
-    row_sample_idx = sweep_grp["sample_idx"][:]
-    row_pos = sweep_grp["pos"][:]
-    row_vocab_id = sweep_grp["vocab_id"][:]
+    row_sample_idx = sweep_data["sample_idx"]
+    row_pos = sweep_data["pos"]
+    row_vocab_id = sweep_data["vocab_id"]
     d_model = flat.shape[1]
     n_rows = flat.shape[0]
 
@@ -167,16 +155,26 @@ def run_layer(
 
     generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
-    input_dist_ds = out_grp.create_dataset(
-        "input_distance", shape=(n_rows, n_samples), dtype="float32"
+    writer = ShardedLayerWriter(
+        layer_key=layer_key,
+        n_rows=n_rows,
+        schema={
+            "input_distance": ((n_samples,), "float32"),
+            "output_distance": ((n_samples,), "float32"),
+            "k": ((), "int64"),
+            "sample_idx": ((), "int64"),
+            "pos": ((), "int64"),
+            "vocab_id": ((), "int64"),
+        },
+        shard_rows=shard_rows,
+        flush_every=flush_every,
+        attrs={
+            "n_samples": n_samples, "radius": radius, "knn_k": knn_k, "d_model": d_model,
+            "input": sublayer_input, "output": sublayer_output,
+        },
+        no_push=no_push,
+        project_root=project_root,
     )
-    output_dist_ds = out_grp.create_dataset(
-        "output_distance", shape=(n_rows, n_samples), dtype="float32"
-    )
-    k_ds = out_grp.create_dataset("k", shape=(n_rows,), dtype="int64")
-    sample_idx_ds = out_grp.create_dataset("sample_idx", shape=(n_rows,), dtype="int64")
-    pos_ds = out_grp.create_dataset("pos", shape=(n_rows,), dtype="int64")
-    vocab_id_ds = out_grp.create_dataset("vocab_id", shape=(n_rows,), dtype="int64")
 
     base_input_activation = base_activations[sublayer_input]  # (n_base, seq, d_model) bf16
     seq_len, d_model_check = base_input_activation.shape[1], base_input_activation.shape[2]
@@ -185,14 +183,15 @@ def run_layer(
     # Process rows in blocks so the SVD and the ONNX forward pass are each
     # issued as a handful of large batched calls instead of n_rows tiny ones
     # -- per-call (kernel launch / ORT session) overhead otherwise dominates
-    # wall-clock time at n_rows ~ 800k. rows_per_block is independent of
-    # cfg.batch (the subgraph's fixed ORT input batch dim): run_sublayer_batch
-    # internally chunks the block's (rows_per_block * (n_samples+1)) sequences
-    # into cfg.batch-sized ORT calls.
+    # wall-clock time at n_rows ~ 800k. rows_per_block is independent of the
+    # node's fixed ORT input batch dim (see cfg.batch_for_node):
+    # run_sublayer_batch internally chunks the block's
+    # (rows_per_block * (n_samples+1)) sequences into batch-sized ORT calls.
     rows_per_block = max(1, rows_per_block)
+    batch = cfg.batch_for_node()
 
     for block_i, block_start in enumerate(tqdm.tqdm(
-        range(0, n_rows, rows_per_block), desc=f"{sublayer_input}.{sublayer_output}"
+        range(writer.next_row, n_rows, rows_per_block), desc=f"{sublayer_input}.{sublayer_output}"
     )):
         block_end = min(block_start + rows_per_block, n_rows)
         idx = np.arange(block_start, block_end)  # host-side: used only for h5/numpy slicing
@@ -236,46 +235,49 @@ def run_layer(
             sublayer_output,
             seqs.reshape(b * (n_samples + 1), seq_len, d_model),
             pos_arr,
-            cfg.batch,
+            batch,
         ).reshape(b, n_samples + 1, d_model)
         sampled_out, center_out = out_vecs[:, :-1], out_vecs[:, -1]
 
         input_dist = (sampled - centers.unsqueeze(1)).norm(dim=-1)  # (b, n_samples)
         output_dist = (sampled_out - center_out.unsqueeze(1)).norm(dim=-1)  # (b, n_samples)
 
-        input_dist_ds[block_start:block_end] = input_dist.detach().cpu().numpy()
-        output_dist_ds[block_start:block_end] = output_dist.detach().cpu().numpy()
-        k_ds[block_start:block_end] = k
-        sample_idx_ds[block_start:block_end] = block_sample_idx
-        pos_ds[block_start:block_end] = block_pos
-        vocab_id_ds[block_start:block_end] = row_vocab_id[idx]
+        writer.write_rows(
+            block_start,
+            block_end,
+            input_distance=input_dist.detach().cpu().numpy(),
+            output_distance=output_dist.detach().cpu().numpy(),
+            k=np.full(b, k, dtype=np.int64),
+            sample_idx=block_sample_idx,
+            pos=block_pos,
+            vocab_id=row_vocab_id[idx],
+        )
 
-        is_last_block = block_end == n_rows
-        if (block_i + 1) % flush_every == 0 or is_last_block:
-            out_grp.file.flush()
+    writer.close()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=str, help="Path to a toml ModelConfig")
     parser.add_argument(
-        "--perturbed-sweep-h5",
+        "--perturbed-sweep-dir",
         type=str,
-        default="onnx_models/smoll/perturbed_sweep.h5",
-        help="h5 file produced by scripts/generate_perturbed_sweep.py",
+        default="onnx_models/smoll/perturbed_sweep",
+        help="Output directory produced by scripts/generate_perturbed_sweep.py "
+        "(one sharded output per layer)",
     )
     parser.add_argument(
-        "--base-activations-h5",
+        "--base-activations-dir",
         type=str,
-        default="onnx_models/smoll/base_activations.h5",
-        help="h5 file produced by scripts/generate_base_activations.py",
+        default="onnx_models/smoll/base_activations",
+        help="Output directory produced by scripts/generate_base_activations.py",
     )
     parser.add_argument(
         "--out-dir",
         type=str,
         default="onnx_models/smoll/tangent_manifold_distances",
-        help="Output directory -- one h5 file per sublayer (named "
-        "{input}.{output}.h5) is written here",
+        help="Output directory -- one sharded output per sublayer (under "
+        "{input}.{output}/) is written here",
     )
     parser.add_argument(
         "--n-samples",
@@ -314,13 +316,20 @@ def main() -> None:
         "--flush-every",
         type=int,
         default=20,
-        help="Flush each layer's output h5 file every this many blocks",
+        help="Flush the current shard's h5 file to local scratch disk every this many blocks",
+    )
+    parser.add_argument(
+        "--shard-rows",
+        type=int,
+        default=100_000,
+        help="Rows per shard -- each shard is written to local scratch disk, "
+        "then pushed to the remote store and deleted locally as soon as it's full",
     )
     parser.add_argument("--seed", type=int, default=0, help="Seed for tangent-ball sampling")
     parser.add_argument(
         "--no-push",
         action="store_true",
-        help="Don't push each layer's h5 file to the remote store as it finishes",
+        help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
     args = parser.parse_args()
 
@@ -330,48 +339,35 @@ def main() -> None:
     ensure_base_model(cfg, force=False, verbose=False)
     sub_graphs = ensure_subgraphs(cfg, force=False)
 
-    ensure_local(args.perturbed_sweep_h5)
-    ensure_local(args.base_activations_h5)
-    base_seqs, base_activations = load_base_activations(args.base_activations_h5)
+    base_seqs, base_activations = load_activations(args.base_activations_dir)
     print(f"base_seqs: {base_seqs.shape}, activations: {sorted(base_activations)}")
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    with h5py.File(args.perturbed_sweep_h5, "r") as sweep_h5f:
-        for subgraph_path, sublayer_conf in tqdm.tqdm(sub_graphs, desc="sublayers"):
-            layer_name = f"{sublayer_conf.input}.{sublayer_conf.output}"
-            layer_h5_path = os.path.join(args.out_dir, f"{layer_name}.h5")
+    for subgraph_path, sublayer_conf in tqdm.tqdm(sub_graphs, desc="sublayers"):
+        layer_name = f"{sublayer_conf.input}.{sublayer_conf.output}"
+        layer_key = os.path.join(args.out_dir, layer_name)
 
-            with h5py.File(layer_h5_path, "w") as out_h5f:
-                out_h5f.attrs["n_samples"] = args.n_samples
-                out_h5f.attrs["radius"] = args.radius
-                out_h5f.attrs["knn_k"] = knn_k
-                out_h5f.attrs["d_model"] = cfg.d_model
-                out_grp = out_h5f.create_group(layer_name)
-                out_grp.attrs["input"] = sublayer_conf.input
-                out_grp.attrs["output"] = sublayer_conf.output
+        run_layer(
+            cfg,
+            args.perturbed_sweep_dir,
+            base_seqs,
+            base_activations,
+            sublayer_conf.input,
+            sublayer_conf.output,
+            subgraph_path,
+            layer_key,
+            n_samples=args.n_samples,
+            radius=args.radius,
+            knn_k=knn_k,
+            query_batch=args.query_batch,
+            seed=args.seed,
+            rows_per_block=args.rows_per_block,
+            flush_every=args.flush_every,
+            shard_rows=args.shard_rows,
+            no_push=args.no_push,
+            project_root=".",
+        )
 
-                run_layer(
-                    cfg,
-                    sweep_h5f,
-                    base_seqs,
-                    base_activations,
-                    sublayer_conf.input,
-                    sublayer_conf.output,
-                    subgraph_path,
-                    out_grp,
-                    n_samples=args.n_samples,
-                    radius=args.radius,
-                    knn_k=knn_k,
-                    query_batch=args.query_batch,
-                    seed=args.seed,
-                    rows_per_block=args.rows_per_block,
-                    flush_every=args.flush_every,
-                )
-
-            print(f"{layer_name}: saved tangent manifold distances to {layer_h5_path}")
-
-            if not args.no_push:
-                push(layer_h5_path)
+        print(f"{layer_name}: saved tangent manifold distances under {layer_key}")
 
 
 if __name__ == "__main__":

@@ -226,8 +226,8 @@ def ptr_name(filename):
     return filename if filename.endswith(".ptr") else filename + ".ptr"
 
 
-def _ptr_path_for(local_path):
-    rel = os.path.relpath(local_path, PROJECT_ROOT)
+def _ptr_path_for(local_path, virtual_path=None):
+    rel = virtual_path if virtual_path is not None else os.path.relpath(local_path, PROJECT_ROOT)
     return os.path.join(PTRS_DIR, ptr_name(rel))
 
 
@@ -252,9 +252,15 @@ def _read_h5_meta(local_path):
         return None
 
 
-def write_ptr(local_path, digest, size):
-    rel = os.path.relpath(local_path, PROJECT_ROOT)
-    ptr_path = _ptr_path_for(local_path)
+def write_ptr(local_path, digest, size, virtual_path=None):
+    """`virtual_path` (project-relative, e.g. "onnx_models/foo/bar/shard_00000.h5")
+    lets a file that physically lives outside PROJECT_ROOT (e.g. node-local
+    scratch disk) register in the NFS-side .ptrs/ index and remote index at
+    the path it would occupy if it were checked into the project -- so
+    `pull`/`ls`/`clean` keep working against a consistent project-relative
+    namespace regardless of where a shard was actually written."""
+    rel = virtual_path if virtual_path is not None else os.path.relpath(local_path, PROJECT_ROOT)
+    ptr_path = _ptr_path_for(local_path, virtual_path)
     os.makedirs(os.path.dirname(ptr_path), exist_ok=True)
     data = {
         "filename": os.path.basename(local_path),
@@ -272,9 +278,9 @@ def write_ptr(local_path, digest, size):
     return ptr_path, data
 
 
-def load_ptr(local_path):
+def load_ptr(local_path, virtual_path=None):
     """Return cached ptr data if mtime matches, else None."""
-    ptr_path = _ptr_path_for(local_path)
+    ptr_path = _ptr_path_for(local_path, virtual_path)
     if not os.path.exists(ptr_path):
         return None
     with open(ptr_path) as f:
@@ -311,10 +317,10 @@ def remote_index_path(config, original_path):
 OVERRIDE_FLAG = "_override"
 
 
-def _mark_override(local_path, digest, size):
+def _mark_override(local_path, digest, size, virtual_path=None):
     """Write a ptr flagged for later force-push (used when conflict can't be resolved interactively)."""
-    rel = os.path.relpath(local_path, PROJECT_ROOT)
-    ptr_path = _ptr_path_for(local_path)
+    rel = virtual_path if virtual_path is not None else os.path.relpath(local_path, PROJECT_ROOT)
+    ptr_path = _ptr_path_for(local_path, virtual_path)
     os.makedirs(os.path.dirname(ptr_path), exist_ok=True)
     data = {
         "filename": os.path.basename(local_path),
@@ -330,13 +336,18 @@ def _mark_override(local_path, digest, size):
     return ptr_path
 
 
-def _push_file(local_path, config, force=False):
-    """Run in a worker thread. Returns (local_path, ok: bool)."""
+def _push_file(local_path, config, force=False, virtual_path=None):
+    """Run in a worker thread. Returns (local_path, ok: bool).
+
+    `virtual_path`: see write_ptr -- the project-relative path to record in
+    the pointer/remote index, when it differs from local_path's actual
+    location relative to PROJECT_ROOT (e.g. a shard written to node-local
+    scratch disk)."""
     import random
     name = os.path.basename(local_path)
     size = os.path.getsize(local_path)
 
-    cached = load_ptr(local_path)
+    cached = load_ptr(local_path, virtual_path)
     if cached:
         digest = cached["hash"]
         tprint(f"[{name}] mtime unchanged, reusing hash {digest[:8]}…")
@@ -350,7 +361,7 @@ def _push_file(local_path, config, force=False):
 
     sftp = open_sftp(config)
     try:
-        original_path = os.path.relpath(local_path, PROJECT_ROOT)
+        original_path = virtual_path if virtual_path is not None else os.path.relpath(local_path, PROJECT_ROOT)
         remote_idx = remote_index_path(config, original_path)
         sftp_mkdir_p(sftp, os.path.dirname(remote_idx))
 
@@ -360,7 +371,7 @@ def _push_file(local_path, config, force=False):
                     existing = json.load(f)
                 if existing["hash"] == digest:
                     tprint(f"[{name}] hash matches remote, skipping upload.")
-                    write_ptr(local_path, digest, size)
+                    write_ptr(local_path, digest, size, virtual_path)
                     return local_path, True
                 else:
                     remote_mtime = existing.get("mtime")
@@ -381,7 +392,7 @@ def _push_file(local_path, config, force=False):
                                 print("  Skipped.")
                                 return local_path, False
                         except EOFError:
-                            ptr_path = _mark_override(local_path, digest, size)
+                            ptr_path = _mark_override(local_path, digest, size, virtual_path)
                             print(f"  Non-interactive: marked for later override ({ptr_path})")
                             return local_path, False
             except FileNotFoundError:
@@ -397,7 +408,7 @@ def _push_file(local_path, config, force=False):
             sftp_put(sftp, local_path, cache_remote)
 
         # write pointer locally (clears any override flag)
-        ptr_path, ptr_data = write_ptr(local_path, digest, size)
+        ptr_path, ptr_data = write_ptr(local_path, digest, size, virtual_path)
         tprint(f"[{name}] pointer: {ptr_path}")
 
         # mirror pointer to remote index
@@ -410,11 +421,17 @@ def _push_file(local_path, config, force=False):
     return local_path, True
 
 
-def cmd_push(local_path, config, auto_delete=False):
+def cmd_push(local_path, config, auto_delete=False, virtual_path=None):
+    """`virtual_path` (single-file push only -- ignored for a directory,
+    since a dir push derives each file's project-relative path by walking)
+    lets `local_path` be a file outside PROJECT_ROOT that should register in
+    the pointer/remote index at the given project-relative path instead."""
     if not os.path.exists(local_path):
         sys.exit(f"Path does not exist: {local_path}")
 
     is_dir = os.path.isdir(local_path)
+    if is_dir and virtual_path is not None:
+        sys.exit("virtual_path is only supported when pushing a single file, not a directory")
     files = (
         [os.path.join(dp, f) for dp, _, fnames in os.walk(local_path)
          for f in fnames if not f.startswith("._") and not f.startswith(".")]
@@ -431,7 +448,7 @@ def cmd_push(local_path, config, auto_delete=False):
 
     uploaded, skipped = [], []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_push_file, f, config): f for f in files}
+        futures = {pool.submit(_push_file, f, config, virtual_path=virtual_path): f for f in files}
         for fut in as_completed(futures):
             path, ok = fut.result()
             (uploaded if ok else skipped).append(path)

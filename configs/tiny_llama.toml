@@ -1,0 +1,102 @@
+name = "tiny_llama"
+model = "TinyLlama/TinyLlama_v1.1"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 32000
+batch = 32                   # 14336 (8*896) Jacobian elements chunked in batches of this size; also
+                               # evenly divides d_model=896 for jacobian_position-restricted (single-token) runs
+seq = 8
+d_model = 2048
+
+[input_source]
+tokenizer = "SimpleStories/SimpleStories-V2-11M"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
+
+
+[[sublayers]]
+input = "input_ids"
+output = "embedding"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+[[sublayers]]
+input = "embedding"
+output = "add_6"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_6"
+output = "add_8"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+[[sublayers]]
+input = "add_8"
+output = "add_12"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_12"
+output = "add_14"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_14"
+output = "add_18"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_18"
+output = "add_20"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+[[sublayers]]
+input = "add_20"
+output = "add_24"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_24"
+output = "add_26"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+[[sublayers]]
+input = "add_26"
+output = "add_30"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_30"
+output = "add_32"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+[[sublayers]]
+input = "add_32"
+output = "add_36"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+
+
+[[sublayers]]
+input = "add_36"
+output = "add_38"
+loss_type = "MaskedSumLoss"
+input_shape = [32, 8, 2048]
+

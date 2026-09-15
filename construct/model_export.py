@@ -7,12 +7,13 @@ from config import ModelConfig
 
 
 def _dummy_input(cfg: ModelConfig) -> torch.Tensor:
+    batch = cfg.batch_for_node()
     if cfg.input_name == "input_ids":
-        return torch.randint(0, cfg.vocab_size, (cfg.batch, cfg.seq))
+        return torch.randint(0, cfg.vocab_size, (batch, cfg.seq))
     assert cfg.input_dim is not None, (
         f"{cfg.name}: input_dim required in config for non-input_ids models"
     )
-    return torch.randn(cfg.batch, cfg.seq, cfg.input_dim)
+    return torch.randn(batch, cfg.seq, cfg.input_dim)
 
 
 def _needs_embeds_kwarg(cfg: ModelConfig) -> bool:

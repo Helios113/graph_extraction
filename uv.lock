@@ -1575,7 +1575,7 @@ requires-dist = [
     { name = "ml-dtypes", specifier = ">=0.6.0" },
     { name = "notebook", specifier = ">=7.6.1" },
     { name = "onnx", specifier = ">=1.22.0" },
-    { name = "onnxruntime-training", path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0_py311_cuda12/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" },
+    { name = "onnxruntime-training", path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0_py311_cuda12_sm86/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu126-cp311-cp311-linux_x86_64.whl" },
     { name = "onnxscript", specifier = ">=0.7.1" },
     { name = "paramiko", specifier = ">=5.0.0" },
     { name = "scikit-learn", specifier = ">=1.9.0" },
@@ -1854,8 +1854,8 @@ wheels = [
 
 [[package]]
 name = "onnxruntime-training"
-version = "1.20.0+cu128"
-source = { path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0_py311_cuda12/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl" }
+version = "1.20.0+cu126"
+source = { path = "/nfs-share/pa511/code_bases/onnxruntime_build_output/1.20.0_py311_cuda12_sm86/ort_build/RelWithDebInfo/dist/onnxruntime_training-1.20.0+cu126-cp311-cp311-linux_x86_64.whl" }
 dependencies = [
     { name = "cerberus" },
     { name = "flatbuffers" },
@@ -1868,7 +1868,7 @@ dependencies = [
     { name = "sympy" },
 ]
 wheels = [
-    { filename = "onnxruntime_training-1.20.0+cu128-cp311-cp311-linux_x86_64.whl", hash = "sha256:603d15e8532e07b2b721a02028b2352d1357f1a67b0751c8111219d979c08de4" },
+    { filename = "onnxruntime_training-1.20.0+cu126-cp311-cp311-linux_x86_64.whl", hash = "sha256:a9c89a1a4e01391ec51c6997e2c9b3dfe961c8b75de7d2c7e77a06a58fe6ed68" },
 ]
 
 [package.metadata]

@@ -6,3 +6,5 @@ upload.cfg
 
 logs/*
 *.onnx
+*.ptr
+*.json

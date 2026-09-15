@@ -18,4 +18,4 @@ CONFIG="${1:-configs/smoll_jac.toml}"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}"
 
-exec uv run python -m scripts.generate_base_activations configs/smoll_jac_later_layers.toml --base-seqs-h5 data/small.h5 --out onnx_models/smoll_small/base_activations.h5
+exec uv run python -m scripts.generate_base_activations configs/smoll_jac_later_layers.toml --base-seqs-h5 data/small --out-dir onnx_models/smoll_small/base_activations

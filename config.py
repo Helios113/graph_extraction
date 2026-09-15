@@ -1,9 +1,16 @@
+import os
+import socket
 from typing import Any
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ONNX_DIR = Path("onnx_models")
+
+
+def current_node_name() -> str:
+    """The Slurm-allocated node name, or this host's hostname outside Slurm."""
+    return os.environ.get("SLURMD_NODENAME") or socket.gethostname()
 
 from enum import Enum
 
@@ -54,7 +61,7 @@ _UNSET: Any = object()
 class ModelConfig:
     name: str
 
-    model: str        
+    model: str
     vocab_size: int
     batch: int
     seq: int
@@ -64,25 +71,40 @@ class ModelConfig:
     input_source: InputSourceConfig = field(default_factory=InputSourceConfig)
     jacobian_position: int | None = None
     random_init: bool = False
+    batch_by_node: dict[str, int] = field(default_factory=dict)
+
+    def batch_for_node(self, node: str | None = None) -> int:
+        """The fixed ONNX batch dim to use on `node` (default: the current
+        node, per `current_node_name()`) -- `batch_by_node[node]` if set,
+        else the plain `batch` default. Different nodes have different GPUs
+        (e.g. mauao's A40 vs ruapehu's H100) and so fit different max batch
+        sizes; see scripts/find_max_batch_size.py."""
+        node = node or current_node_name()
+        return self.batch_by_node.get(node, self.batch)
 
     @property
     def dir(self) -> Path:
-        """This config's own subfolder -- every artifact it produces lives under here,
-        except h5 outputs when save_dir is set -- see h5_dir."""
-        return ONNX_DIR / self.name
-    
-    @property
-    def base_model_path(self) -> Path:
-        return self.dir / "base_model.onnx"
-    
-    @property
-    def sub_block_path(self) -> Path:
-        return self.dir / "sub_blocks"
+        """This config's own subfolder -- every artifact it produces (base
+        model export, subgraphs, pullbacks) lives under here, except h5
+        outputs when save_dir is set -- see h5_dir.
+
+        The fixed ONNX batch dim (see `batch_for_node`) is baked into the
+        base model at export time, so once a config sets `batch_by_node` for
+        more than one node, each node needs its own export -- suffixed here
+        by node name so mauao and ruapehu don't clobber/misuse each other's
+        cached export. Configs with at most one `batch_by_node` entry keep
+        the old unsuffixed path so existing caches stay valid."""
+        if len(self.batch_by_node) <= 1:
+            return ONNX_DIR / self.name
+        return ONNX_DIR / self.name / current_node_name()
 
     @property
     def base_model_path(self) -> Path:
-        assert self.dir is not None
         return self.dir / "base_model.onnx"
+
+    @property
+    def sub_block_path(self) -> Path:
+        return self.dir / "sub_blocks"
 
 def load_config(path: str) -> ModelConfig:
     with open(path, "rb") as f:

@@ -11,7 +11,7 @@ import tqdm
 from config import load_config
 from construct.construct import ensure_base_model, ensure_extra_outputs
 from execute.io_onnx import run_iobinding_cpu_input_gpu_output
-from execute.remote_storage import ensure_local, push
+from execute.sharded_writer import ShardedLayerWriter, load_base_seqs
 
 DEVICE = torch.device("cuda")
 
@@ -42,16 +42,19 @@ def build_chunk_rows(
 def run_perturbed_sweep(
     cfg,
     base_seqs: np.ndarray,
-    out_path: str,
+    out_dir: str,
     n_samples: int,
     flush_every: int,
+    shard_rows: int,
     no_push: bool = False,
+    project_root: str = ".",
 ) -> None:
     base_seqs = base_seqs[:n_samples]
 
+    batch = cfg.batch_for_node()
     n_rows = n_samples * cfg.seq * cfg.vocab_size
-    n_chunks = -(-n_rows // cfg.batch)  # ceil division
-    print(f"n_rows: {n_rows}, n_chunks: {n_chunks}")
+    n_chunks = -(-n_rows // batch)  # ceil division
+    print(f"n_rows: {n_rows}, n_chunks: {n_chunks} (batch={batch})")
 
     ensure_base_model(cfg, force=False, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
@@ -70,84 +73,99 @@ def run_perturbed_sweep(
     out_input_names = [o.name for o in out_sess.get_inputs()]
     print(out_output_names, out_input_names)
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with h5py.File(out_path, "w") as h5f:
-        h5f.attrs["n_samples"] = n_samples
-        h5f.attrs["seq"] = cfg.seq
-        h5f.attrs["d_model"] = cfg.d_model
+    # original (unperturbed) sequences, indexed by sample_idx -- each row's
+    # sample_idx (saved per layer below) points into this table, so the
+    # original sequence a row was derived from is base_seqs[sample_idx]. This
+    # table is tiny (n_samples rows) relative to the sweep itself, so it's
+    # kept as one small NFS-side file per run rather than sharded.
+    base_seqs_path = os.path.join(project_root, out_dir, "base_seqs.h5")
+    os.makedirs(os.path.dirname(base_seqs_path), exist_ok=True)
+    if not os.path.exists(base_seqs_path):
+        with h5py.File(base_seqs_path, "w") as f:
+            f.attrs["n_samples"] = n_samples
+            f.attrs["seq"] = cfg.seq
+            f.attrs["d_model"] = cfg.d_model
+            f.create_dataset("base_seqs", data=base_seqs)
 
-        # original (unperturbed) sequences, indexed by sample_idx -- each
-        # row's sample_idx (saved per layer below) points into this table,
-        # so the original sequence a row was derived from is
-        # base_seqs[sample_idx].
-        h5f.create_dataset("base_seqs", data=base_seqs)
+    writers = {
+        output_name: ShardedLayerWriter(
+            layer_key=os.path.join(out_dir, output_name),
+            n_rows=n_rows,
+            schema={
+                "vec": ((cfg.d_model,), "float32"),
+                "sample_idx": ((), "int64"),
+                "pos": ((), "int64"),
+                "vocab_id": ((), "int64"),
+            },
+            shard_rows=shard_rows,
+            flush_every=flush_every,
+            attrs={"n_samples": n_samples, "seq": cfg.seq, "d_model": cfg.d_model,
+                   "output_name": output_name},
+            no_push=no_push,
+            project_root=project_root,
+        )
+        for output_name in out_output_names[1:]
+    }
+    # All layers advance through the same chunk loop in lockstep, but may
+    # have reached different next_row values before a crash (e.g. one
+    # layer's shard finished uploading, another's didn't) -- resume from the
+    # earliest, and each writer skips rows it already has.
+    resume_row = min(w.next_row for w in writers.values())
 
-        datasets = {}
-        for output_name in out_output_names[1:]:
-            grp = h5f.create_group(output_name)
-            grp.attrs["output_name"] = output_name
-            datasets[output_name] = {
-                "vec": grp.create_dataset(
-                    "vec", shape=(n_rows, cfg.d_model), dtype="float32",
-                ),
-                "sample_idx": grp.create_dataset(
-                    "sample_idx", shape=(n_rows,), dtype="int64",
-                ),
-                "pos": grp.create_dataset("pos", shape=(n_rows,), dtype="int64"),
-                "vocab_id": grp.create_dataset(
-                    "vocab_id", shape=(n_rows,), dtype="int64",
-                ),
-            }
+    for c in tqdm.tqdm(range(n_chunks)):
+        row_start = c * batch
+        row_end = min(row_start + batch, n_rows)
+        if row_end <= resume_row:
+            continue
+        valid = row_end - row_start
 
-        for c in tqdm.tqdm(range(n_chunks)):
-            row_start = c * cfg.batch
-            row_end = min(row_start + cfg.batch, n_rows)
-            valid = row_end - row_start
-
-            token_ids, chunk_sample_idx, chunk_pos, chunk_vocab_id = build_chunk_rows(
-                cfg, base_seqs, row_start, row_end,
+        token_ids, chunk_sample_idx, chunk_pos, chunk_vocab_id = build_chunk_rows(
+            cfg, base_seqs, row_start, row_end,
+        )
+        if valid < batch:
+            # pad the last chunk up to batch by repeating the last row
+            pad = batch - valid
+            token_ids = np.concatenate(
+                [token_ids, np.repeat(token_ids[-1:], pad, axis=0)], axis=0,
             )
-            if valid < cfg.batch:
-                # pad the last chunk up to cfg.batch by repeating the last row
-                pad = cfg.batch - valid
-                token_ids = np.concatenate(
-                    [token_ids, np.repeat(token_ids[-1:], pad, axis=0)], axis=0,
-                )
 
-            fx = run_iobinding_cpu_input_gpu_output(
-                out_sess,
-                out_input_names[0],
-                token_ids,
-                out_output_names,
+        fx = run_iobinding_cpu_input_gpu_output(
+            out_sess,
+            out_input_names[0],
+            token_ids,
+            out_output_names,
+        )
+
+        # gather the swept position's d_model vector for each row in the
+        # chunk
+        batch_arange = np.arange(valid)
+
+        for i, output_name in enumerate(out_output_names[1:], start=1):
+            writer = writers[output_name]
+            if row_end <= writer.next_row:
+                continue  # this layer already has this chunk from a prior run
+
+            layer_out = fx[i][:valid]  # (valid, cfg.seq, d_model)
+            swept_vecs = (
+                layer_out[batch_arange, chunk_pos]
+                .to(torch.float32)
+                .detach()
+                .cpu()
+                .numpy()
             )
 
-            # gather the swept position's d_model vector for each row in the
-            # chunk
-            batch_arange = np.arange(valid)
+            writer.write_rows(
+                row_start, row_end,
+                vec=swept_vecs,
+                sample_idx=chunk_sample_idx,
+                pos=chunk_pos,
+                vocab_id=chunk_vocab_id,
+            )
 
-            for i, output_name in enumerate(out_output_names[1:], start=1):
-                layer_out = fx[i][:valid]  # (valid, cfg.seq, d_model)
-                swept_vecs = (
-                    layer_out[batch_arange, chunk_pos]
-                    .to(torch.float32)
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
+    for output_name, writer in writers.items():
+        writer.close()
 
-                ds = datasets[output_name]
-                ds["vec"][row_start:row_end] = swept_vecs
-                ds["sample_idx"][row_start:row_end] = chunk_sample_idx
-                ds["pos"][row_start:row_end] = chunk_pos
-                ds["vocab_id"][row_start:row_end] = chunk_vocab_id
-
-            if (c + 1) % flush_every == 0 or c == n_chunks - 1:
-                h5f.flush()
-
-    print(f"Saved perturbed sweep outputs to {out_path}")
-
-    if not no_push:
-        push(out_path)
+    print(f"Saved perturbed sweep outputs under {out_dir}")
 
 
 def main() -> None:
@@ -156,14 +174,15 @@ def main() -> None:
     parser.add_argument(
         "--base-seqs-h5",
         type=str,
-        default="data/smoll_sequences.h5",
-        help="h5 file (from scripts/tokenize_to_h5.py) containing an input_ids dataset of (n_samples, seq) token ids",
+        default="data/smoll_sequences",
+        help="Output layer key (from scripts.generate_base_sequences) for a sharded "
+        "input_ids dataset of (n_samples, seq) token ids",
     )
     parser.add_argument(
-        "--out",
+        "--out-dir",
         type=str,
-        default="onnx_models/smoll/perturbed_sweep.h5",
-        help="Output h5 path for the perturbed sweep outputs",
+        default="onnx_models/smoll/perturbed_sweep",
+        help="Output directory -- one sharded output per layer is written here",
     )
     parser.add_argument(
         "--n-samples",
@@ -175,28 +194,34 @@ def main() -> None:
         "--flush-every",
         type=int,
         default=50,
-        help="Flush the output h5 file every this many chunks",
+        help="Flush the current shard's h5 file to local scratch disk every this many chunks",
+    )
+    parser.add_argument(
+        "--shard-rows",
+        type=int,
+        default=100_000,
+        help="Rows per shard -- each shard is written to local scratch disk, "
+        "then pushed to the remote store and deleted locally as soon as it's full",
     )
     parser.add_argument(
         "--no-push",
         action="store_true",
-        help="Don't push --out to the remote store when finished",
+        help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
-    ensure_local(args.base_seqs_h5)
-    with h5py.File(args.base_seqs_h5, "r") as h5f:
-        base_seqs = h5f["input_ids"][:]
+    base_seqs = load_base_seqs(args.base_seqs_h5)
     print(f"base_seqs: {base_seqs.shape}")
 
     run_perturbed_sweep(
         cfg,
         base_seqs,
-        args.out,
+        args.out_dir,
         n_samples=args.n_samples,
         flush_every=args.flush_every,
+        shard_rows=args.shard_rows,
         no_push=args.no_push,
     )
 

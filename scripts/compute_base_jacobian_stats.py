@@ -1,18 +1,19 @@
 """Compute Jacobian singular-value statistics at the original (unperturbed)
 sequences.
 
-Loads the activations saved by `collect_base_activations.py` and, for each
-sublayer in a reduced Jacobian config (e.g. `configs/smoll_jac.toml`),
+Loads the activations saved by `scripts/generate_base_activations.py` and,
+for each sublayer in a reduced Jacobian config (e.g. `configs/smoll_jac.toml`),
 computes the exact Jacobian of that sublayer's output w.r.t. its input, at
 every sequence position. From each d_model x d_model Jacobian we keep only
 the smallest singular value and the condition number, and save those to disk
 (not the full Jacobians, which would be far larger).
 
-Each sublayer is written to its own h5 file under --out-dir, and within a
-sublayer, samples are processed in --chunk-size chunks -- each chunk is
-appended and flushed to disk as soon as it's ready, so a partial/interrupted
-run still leaves usable results, and progress is visible on disk as it
-happens.
+Each sublayer is written via a ShardedLayerWriter under --out-dir: rows
+(samples) are processed in --chunk-size chunks, sharded to local scratch
+disk, pushed to the remote store and deleted locally as soon as a shard
+fills, with progress checkpointed on NFS -- so a crash partway through only
+loses the in-progress shard, and re-running the same command resumes rather
+than restarting.
 
 Usage:
     uv run python -m scripts.compute_base_jacobian_stats configs/smoll_jac.toml
@@ -29,58 +30,22 @@ import tqdm
 from config import load_config
 from construct.construct import ensure_base_model, ensure_subgraph_pullback, ensure_subgraphs
 from execute.jacobian import compute_jacobian
+from execute.sharded_writer import ShardedLayerWriter, load_activations
 
 DEVICE = torch.device("cuda")
 
 
-def load_activations(path: str) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Inverse of collect_base_activations.save_activations: activations were
-    stored as raw uint16 (h5py has no native bfloat16 type), so view them
-    back to ml_dtypes.bfloat16 here."""
-    with h5py.File(path, "r") as h5f:
-        base_seqs = h5f["base_seqs"][:]
-        activations = {
-            name: dset[:].view(ml_dtypes.bfloat16) for name, dset in h5f["activations"].items()
-        }
-    return base_seqs, activations
-
-
-def _open_layer_h5(path: str, base_seqs: np.ndarray, seq: int, d_model: int) -> h5py.File:
-    """Creates the per-layer output file with resizable, chunk-appendable
-    smallest_singular_value / condition_number datasets."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    h5f = h5py.File(path, "w")
-    h5f.attrs["n_samples"] = base_seqs.shape[0]
-    h5f.attrs["seq"] = seq
-    h5f.attrs["d_model"] = d_model
-    h5f.create_dataset("base_seqs", data=base_seqs)
-    h5f.create_dataset(
-        "smallest_singular_value",
-        shape=(0, seq),
-        maxshape=(base_seqs.shape[0], seq),
-        chunks=True,
-        dtype=np.float32,
-    )
-    h5f.create_dataset(
-        "condition_number",
-        shape=(0, seq),
-        maxshape=(base_seqs.shape[0], seq),
-        chunks=True,
-        dtype=np.float32,
-    )
-    return h5f
-
-
-def _append_chunk(h5f: h5py.File, smallest_sv: np.ndarray, condition_number: np.ndarray) -> None:
-    for name, chunk in (
-        ("smallest_singular_value", smallest_sv),
-        ("condition_number", condition_number),
-    ):
-        dset = h5f[name]
-        start = dset.shape[0]
-        dset.resize(start + chunk.shape[0], axis=0)
-        dset[start : start + chunk.shape[0]] = chunk
-    h5f.flush()
+def _save_base_seqs_once(out_dir: str, base_seqs: np.ndarray) -> None:
+    """base_seqs is tiny (n_samples rows) relative to the per-layer sweep
+    outputs, and shared across all layers -- kept as one small NFS-side file
+    per run rather than duplicated into every layer's shards."""
+    path = os.path.join(out_dir, "base_seqs.h5")
+    if os.path.exists(path):
+        return
+    os.makedirs(out_dir, exist_ok=True)
+    with h5py.File(path, "w") as h5f:
+        h5f.attrs["n_samples"] = base_seqs.shape[0]
+        h5f.create_dataset("base_seqs", data=base_seqs)
 
 
 def compute_and_save_jacobian_stats(
@@ -89,6 +54,9 @@ def compute_and_save_jacobian_stats(
     base_seqs: np.ndarray,
     out_dir: str,
     chunk_size: int,
+    shard_rows: int,
+    flush_every: int,
+    no_push: bool,
 ) -> None:
     """For each sublayer, computes the diagonal Jacobian (one d_model x
     d_model block per sequence position per sample) in chunks of chunk_size
@@ -97,9 +65,10 @@ def compute_and_save_jacobian_stats(
     are kept only long enough to run svdvals on, then discarded -- only the
     two scalars per (sample, position) are kept.
 
-    Each chunk is appended to that sublayer's own h5 file under out_dir and
-    flushed to disk immediately, rather than waiting for the whole sublayer
-    (or all sublayers) to finish."""
+    Each chunk is written to that sublayer's ShardedLayerWriter (rows =
+    samples), which shards to local scratch disk, uploads+deletes each shard
+    as soon as it fills, and checkpoints progress on NFS so a crashed run
+    resumes from the last completed chunk instead of restarting."""
     ensure_base_model(cfg, force=False, verbose=False)
     sub_graphs = ensure_subgraphs(cfg, force=False)
     sub_graph_pullbacks = ensure_subgraph_pullback(sub_graphs, force=False)
@@ -109,11 +78,30 @@ def compute_and_save_jacobian_stats(
     sess_options.intra_op_num_threads = 8
 
     n_samples = base_seqs.shape[0]
+    _save_base_seqs_once(out_dir, base_seqs)
 
     for (path, sublayer_conf), pullback_path in tqdm.tqdm(
         zip(sub_graphs, sub_graph_pullbacks), total=len(sub_graphs), desc="sublayers"
     ):
         layer_name = f"{sublayer_conf.input}.{sublayer_conf.output}"
+        seq = sublayer_conf.input_shape[1]
+
+        writer = ShardedLayerWriter(
+            layer_key=os.path.join(out_dir, layer_name),
+            n_rows=n_samples,
+            schema={
+                "smallest_singular_value": ((seq,), "float32"),
+                "condition_number": ((seq,), "float32"),
+            },
+            shard_rows=shard_rows,
+            flush_every=flush_every,
+            attrs={"n_samples": n_samples, "seq": seq, "d_model": sublayer_conf.input_shape[2]},
+            no_push=no_push,
+            project_root=".",
+        )
+        if writer.next_row >= n_samples:
+            continue  # already complete from a prior run
+
         jac_sess = ort.InferenceSession(
             str(pullback_path),
             sess_options=sess_options,
@@ -122,16 +110,14 @@ def compute_and_save_jacobian_stats(
 
         input_data = activations[sublayer_conf.input]
 
-        layer_h5_path = os.path.join(out_dir, f"{layer_name}.h5")
-        h5f = _open_layer_h5(
-            layer_h5_path, base_seqs, sublayer_conf.input_shape[1], sublayer_conf.input_shape[2]
-        )
-
         sv_min, sv_max = np.inf, -np.inf
         cond_min, cond_max = np.inf, -np.inf
 
-        for start in tqdm.trange(0, n_samples, chunk_size, desc=layer_name, leave=False):
-            chunk_input = input_data[start : start + chunk_size]
+        for start in tqdm.trange(
+            writer.next_row, n_samples, chunk_size, desc=layer_name, leave=False
+        ):
+            end = min(start + chunk_size, n_samples)
+            chunk_input = input_data[start:end]
 
             jacobian = compute_jacobian(
                 jac_sess,
@@ -154,17 +140,21 @@ def compute_and_save_jacobian_stats(
             del jacobian, jacobian_t, singular_values
             torch.cuda.empty_cache()
 
-            _append_chunk(h5f, smallest_sv, condition_number)
+            writer.write_rows(
+                start, end,
+                smallest_singular_value=smallest_sv,
+                condition_number=condition_number,
+            )
 
             sv_min, sv_max = min(sv_min, smallest_sv.min()), max(sv_max, smallest_sv.max())
             cond_min = min(cond_min, condition_number.min())
             cond_max = max(cond_max, condition_number.max())
 
-        h5f.close()
+        writer.close()
 
         print(
-            f"{layer_name}: smallest_sv range [{sv_min:.4g}, {sv_max:.4g}], "
-            f"condition_number range [{cond_min:.4g}, {cond_max:.4g}] -> {layer_h5_path}"
+            f"{layer_name}: this run's smallest_sv range [{sv_min:.4g}, {sv_max:.4g}], "
+            f"condition_number range [{cond_min:.4g}, {cond_max:.4g}] -> {writer.layer_key}"
         )
 
 
@@ -172,31 +162,52 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=str, help="Path to a toml ModelConfig")
     parser.add_argument(
-        "--activations-h5",
+        "--activations-dir",
         type=str,
-        default="onnx_models/smoll/base_activations.h5",
-        help="h5 file produced by collect_base_activations.py",
+        default="onnx_models/smoll/base_activations",
+        help="Output directory produced by scripts.generate_base_activations",
     )
     parser.add_argument(
         "--out-dir",
         type=str,
         default="onnx_models/smoll/jacobian_stats",
-        help="Output directory -- one h5 file per sublayer is written here",
+        help="Output directory -- one sharded output per sublayer is written here",
     )
     parser.add_argument(
         "--chunk-size",
         type=int,
         default=32,
-        help="Number of samples to process (and flush to disk) at a time",
+        help="Number of samples to process (and flush to local scratch disk) at a time",
+    )
+    parser.add_argument(
+        "--shard-rows",
+        type=int,
+        default=100_000,
+        help="Rows (samples) per shard -- each shard is written to local scratch disk, "
+        "then pushed to the remote store and deleted locally as soon as it's full",
+    )
+    parser.add_argument(
+        "--flush-every",
+        type=int,
+        default=20,
+        help="Flush the current shard's h5 file to local scratch disk every this many chunks",
+    )
+    parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Keep finished shards on local scratch disk instead of pushing to the remote store",
     )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
-    base_seqs, activations = load_activations(args.activations_h5)
+    base_seqs, activations = load_activations(args.activations_dir)
     print(f"base_seqs: {base_seqs.shape}, activations: {sorted(activations)}")
 
-    compute_and_save_jacobian_stats(cfg, activations, base_seqs, args.out_dir, args.chunk_size)
+    compute_and_save_jacobian_stats(
+        cfg, activations, base_seqs, args.out_dir, args.chunk_size,
+        shard_rows=args.shard_rows, flush_every=args.flush_every, no_push=args.no_push,
+    )
     print(f"saved per-layer singular value / condition number summaries to {args.out_dir}")
 
 
