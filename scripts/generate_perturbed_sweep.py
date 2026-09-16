@@ -199,7 +199,16 @@ def _run_perturbed_sweep_once(
         )
     ensure_base_model(cfg, force=stale_batch, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
-    model_path = ensure_extra_outputs(cfg, extra_outputs, force=stale_batch)
+
+    # Same staleness check as the base model, but applied to the extra-outputs
+    # model itself: it's extracted from base_model_path, so a stale copy left
+    # over from a previous batch size (e.g. before an OOM-triggered shrink)
+    # must be regenerated even when the base model above turned out to
+    # already be current (stale_batch == False), otherwise ORT loads a model
+    # whose static input batch dim doesn't match `batch`.
+    extra_outputs_path = cfg.dir / "base_model_extra_outputs.onnx"
+    stale_extra_outputs = stale_batch or exported_batch_size(extra_outputs_path) != batch
+    model_path = ensure_extra_outputs(cfg, extra_outputs, force=stale_extra_outputs)
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC

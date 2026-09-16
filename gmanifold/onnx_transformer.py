@@ -136,7 +136,15 @@ def make_map(cfg: ModelConfig, src: str, dst: str, batch_size: int | None = None
     SimpleStories-V2-11M block 0's FFN sub-layer).
     """
     sublayer = _find_sublayer(cfg, src, dst)
-    fixed_batch, seq, d_model = sublayer.input_shape
+    # sublayer.input_shape's batch dim is a Jacobian-sweep chunk size (e.g.
+    # 32, tuned for the one-hot Jacobian sweep's GPU throughput -- see
+    # config.py/CLAUDE.md), unrelated to the fixed batch dim the ONNX graph
+    # was actually exported/extracted with (cfg.batch_for_node(), e.g.
+    # 32000). The extracted subgraph's real input shape always has the
+    # latter as its batch dim, so that -- not sublayer.input_shape[0] -- is
+    # what every padded session.run call below must match.
+    fixed_batch = cfg.batch_for_node()
+    _, seq, d_model = sublayer.input_shape
     paths = ensure_subgraphs(cfg, force=False)
     [(path, _)] = [p for p in paths if p[1].input == src and p[1].output == dst]
 
