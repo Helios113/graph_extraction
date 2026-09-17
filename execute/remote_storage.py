@@ -34,25 +34,45 @@ def remote_exists(virtual_path: str, config: dict | None = None) -> bool:
         sftp.close()
 
 
-def ensure_local(path: str, config: dict | None = None) -> str:
+def ensure_local(path: str, config: dict | None = None, dest_dir: str | None = None) -> str:
     """Make sure `path` exists locally, pulling it from the remote store if
-    not. Returns `path` unchanged (for chaining). No-op if already present.
+    not. Returns the local path actually used (== `path` when `dest_dir` is
+    None). No-op if already present at that location.
+
+    `dest_dir`: pull into this directory instead of under
+    `upload.PROJECT_ROOT` (NFS) -- e.g. node-local scratch disk, so a caller
+    that only needs a file transiently doesn't grow shared NFS storage for
+    it. `path` is still treated as project-relative (or made so via
+    os.path.relpath against PROJECT_ROOT if it's already an absolute
+    NFS-rooted path, e.g. from a caller that built it the old way) for
+    pointer lookup/registration -- only where the pulled bytes land changes.
+    A copy already sitting on NFS (e.g. left over from a run that pulled
+    there before this parameter existed, or from a different caller that
+    doesn't pass dest_dir) is reused as-is rather than pulled a second time
+    onto `dest_dir` -- NFS is checked first since that data's already been
+    paid for over SFTP.
     """
-    if os.path.exists(path):
-        return path
+    virtual_path = os.path.relpath(path, upload.PROJECT_ROOT) if os.path.isabs(path) else path
+    nfs_path = os.path.join(upload.PROJECT_ROOT, virtual_path)
+    local_path = os.path.join(dest_dir, virtual_path) if dest_dir is not None else path
+
+    if os.path.exists(local_path):
+        return local_path
+    if dest_dir is not None and os.path.exists(nfs_path):
+        return nfs_path
 
     config = config or upload.load_config()
-    ptr_path = upload._ptr_path_for(os.path.join(upload.PROJECT_ROOT, path))
+    ptr_path = upload._ptr_path_for(os.path.join(upload.PROJECT_ROOT, virtual_path))
     if not os.path.exists(ptr_path):
-        print(f"[remote_storage] no local pointer for {path!r}, checking remote index...")
+        print(f"[remote_storage] no local pointer for {virtual_path!r}, checking remote index...")
         sftp = upload.open_sftp(config)
         try:
-            remote_idx = upload.remote_index_path(config, os.path.relpath(path, upload.PROJECT_ROOT))
+            remote_idx = upload.remote_index_path(config, virtual_path)
             with sftp.open(remote_idx) as f:
                 ptr = json.load(f)
         except FileNotFoundError:
             raise FileNotFoundError(
-                f"{path!r} not found locally or in the remote index ({remote_idx})"
+                f"{virtual_path!r} not found locally or in the remote index ({remote_idx})"
             )
         finally:
             sftp.close()
@@ -60,17 +80,17 @@ def ensure_local(path: str, config: dict | None = None) -> str:
         with open(ptr_path, "w") as f:
             json.dump(ptr, f, indent=2)
 
-    print(f"[remote_storage] pulling {path!r} from remote store...")
+    print(f"[remote_storage] pulling {virtual_path!r} from remote store" + (f" into {dest_dir!r}" if dest_dir else "") + "...")
     upload._board = upload._Board(1) if upload._IS_TTY else upload._LogBoard()
-    ptr = upload.read_ptr(os.path.relpath(path, upload.PROJECT_ROOT))
-    upload._pull_file(ptr, config)
-    return path
+    ptr = upload.read_ptr(virtual_path)
+    upload._pull_file(ptr, config, dest_dir=dest_dir)
+    return local_path
 
 
 def push(
     path: str,
     config: dict | None = None,
-    auto_delete: bool = True,
+    auto_delete: bool = False,
     virtual_path: str | None = None,
     force: bool = False,
 ) -> None:

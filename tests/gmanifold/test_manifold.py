@@ -1,15 +1,35 @@
+"""Plain-script tests for gmanifold.manifold/geometry/tangent/validate -- run with
+`uv run python tests/gmanifold/test_manifold.py` on a CUDA node (e.g. via srun on mauao)."""
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, for `import gmanifold`
+
 import torch
+
 import gmanifold as gm
 from gmanifold.geometry import knn, uniform_ball
+from runner import run_all
+
+# ---------------------------------------------------------------------- shared fixtures
+# A curved 2-D sheet in R^64 with volume element sqrt(1 + (2.4 cos 3s)^2); computed once
+# and reused across tests (mirrors the old session-scoped pytest fixtures).
+_g = torch.Generator(device="cuda").manual_seed(0)
+_A = torch.linalg.qr(torch.randn(64, 3, device="cuda", generator=_g))[0].T * 3
+_st = torch.rand(5000, 2, device="cuda", generator=_g)
+_X = torch.stack([_st[:, 0], _st[:, 1], 0.8 * torch.sin(3 * _st[:, 0])], 1) @ _A
+sheet = (_X[:4500], _X[4500:], _st[:4500], lambda s: torch.sqrt(1 + (2.4 * torch.cos(3 * s)) ** 2))
+sheet_model = gm.fit(gm.GlobalManifold(latent_dim=2, hidden=(128, 64)), sheet[0], epochs=200, X_val=sheet[1], seed=0)
 
 
-def test_fit_quality_and_rank(sheet_model):
+def test_fit_quality_and_rank():
     M = sheet_model
     assert M.history[-1]["val_recon_over_spacing"] < 0.4        # held-out points reconstruct well inside a spacing
     assert M.jacobian_rank()["rank_median"] == 2
 
 
-def test_volume_uniform_sampling(sheet, sheet_model):
+def test_volume_uniform_sampling():
     """Samples must follow the manifold volume element, not the (uniform-in-parameter) data density.
     radius='local' (per-anchor balls) is exact; radius='global' (uniform-thickness neighbourhood) under-covers sparse
     regions at small alpha and sits between data density and the exact target, converging to it as alpha grows."""
@@ -33,7 +53,7 @@ def test_volume_uniform_sampling(sheet, sheet_model):
     assert abs(v_none - data) < 0.4 * gap                                 # un-reweighted follows the data density
 
 
-def test_samples_on_support_and_bands(sheet, sheet_model):
+def test_samples_on_support_and_bands():
     Xtr, Xval, _, _ = sheet
     M = sheet_model
     x, _ = M.sample(2000, alpha=0.3, seed=1)
@@ -43,18 +63,20 @@ def test_samples_on_support_and_bands(sheet, sheet_model):
     assert rep["held-out real"]["u"] > 0.99 and rep["real + 1x noise"]["u"] < 0.95
 
 
-def test_alpha_monotone(sheet_model):
+def test_alpha_monotone():
     M = sheet_model
     d = [float(M.nearest_real(M.sample(2000, alpha=a, seed=0)[0]).median()) for a in (0.1, 0.3, 1.0)]
     assert d[0] < d[1] < d[2]
 
 
-def test_save_load(sheet_model, tmp_path):
+def test_save_load():
     M = sheet_model
-    M.save(tmp_path / "m.pt")
-    M2 = gm.GlobalManifold.load(tmp_path / "m.pt")
-    assert torch.allclose(M2.sample(20, 0.5, seed=3)[0], M.sample(20, 0.5, seed=3)[0])
-    assert torch.allclose(M2.encode(M.X[:5]), M.encode(M.X[:5]))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "m.pt"
+        M.save(path)
+        M2 = gm.GlobalManifold.load(path)
+        assert torch.allclose(M2.sample(20, 0.5, seed=3)[0], M.sample(20, 0.5, seed=3)[0])
+        assert torch.allclose(M2.encode(M.states[:5]), M.encode(M.states[:5]))
 
 
 def test_knn_matches_bruteforce():
@@ -91,13 +113,13 @@ def test_outlier_mask():
     assert mask[0] and mask.sum() == 1
 
 
-def test_tangent_charts(sheet, sheet_model):
+def test_tangent_charts():
     """Local charts: held-out points sit on them, ambient noise does not; conservative samples stay near anchors."""
     Xtr, Xval, _, _ = sheet
     T = gm.TangentCharts(Xtr, m=2)
     assert T.K == 32 and T.bases(torch.arange(5, device="cuda")).shape == (5, 64, 2)
     res_real = T.residual(Xval).median()
-    noise = Xval + 0.5 * sheet_model.spacing.median() * torch.randn_like(Xval) / 8
+    noise = Xval + 0.5 * sheet_model.ambient_spacing.median() * torch.randn_like(Xval) / 8
     assert res_real < 0.2 and T.residual(noise).median() > 2 * res_real
     x, info = T.sample(2000, alpha=0.3, seed=0)
     assert float(sheet_model.nearest_real(x).median()) < 0.4 and T.residual(x).median() < 1e-4
@@ -110,7 +132,7 @@ def test_hub_dominated_cloud_uses_global_unit():
     g = torch.Generator(device="cuda").manual_seed(0)
     X = torch.randn(1500, 256, device="cuda", generator=g); X = 10 * X / X.norm(dim=1, keepdim=True)  # sphere: neighbours ~14 apart
     X[:12] = 0.02 * torch.randn(12, 256, device="cuda", generator=g)            # tight cluster at the centre, 10 from everyone = hub
-    M = gm.GlobalManifold(latent_dim=4, hidden=(64, 32)).fit(X, epochs=5)
+    M = gm.fit(gm.GlobalManifold(latent_dim=4, hidden=(64, 32)), X, epochs=5)
     assert M.spacing_unit == "global" and M.hub_share > 0.3
     assert float(M.nearest_real(X[500:600]).median()) < 2                        # not inflated by the hub's tiny spacing
 
@@ -120,12 +142,12 @@ def test_hub_rule_applies_to_tangent_and_bands():
     X = torch.randn(1500, 256, device="cuda", generator=g); X = 10 * X / X.norm(dim=1, keepdim=True); X[:12] = 0.02 * torch.randn(12, 256, device="cuda", generator=g)
     T = gm.TangentCharts(X, m=4)
     assert float(T.residual(X[500:600] + 0.1 * torch.randn(100, 256, device="cuda", generator=g)).median()) < 2   # global unit, not the hub's
-    M = gm.GlobalManifold(latent_dim=4, hidden=(64, 32)).fit(X, epochs=5)
+    M = gm.fit(gm.GlobalManifold(latent_dim=4, hidden=(64, 32)), X, epochs=5)
     rep = gm.support_report(M, X[600:700], X[500:600])
     assert rep["real + 1x noise"]["nearest_real"] > 1.2 * rep["held-out real"]["nearest_real"]                     # noise bands still separate
 
 
-def test_weight_checker_and_auto_tau(sheet, sheet_model):
+def test_weight_checker_and_auto_tau():
     """Default: exact weights (tau = 1) and no warning on a healthy cloud. A forced ESS floor triggers the warning with a
     suggested tau; auto_tau applies it."""
     M = sheet_model
@@ -137,8 +159,12 @@ def test_weight_checker_and_auto_tau(sheet, sheet_model):
     assert info["tau"] < 0.05 and info["warning"] is None and info["ess"] >= 0.5 * info["n_candidates"]
 
 
-def test_check_sampling_helper(sheet_model):
+def test_check_sampling_helper():
     ok, msg = gm.check_sampling(sheet_model.sample(1000, alpha=0.5, seed=0)[1], verbose=False)
     assert ok and "ok" not in msg.lower() or ok
     ok, msg = gm.check_sampling(sheet_model.sample(1000, alpha=0.5, seed=0, min_ess_frac=0.9)[1], verbose=False)
     assert not ok and "DEGENERATE" in msg and "auto_tau=True" in msg
+
+
+if __name__ == "__main__":
+    run_all(globals())

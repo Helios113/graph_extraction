@@ -88,14 +88,7 @@ def collect_states(
 
 
 def vocab_states(cfg: ModelConfig, embedding_output_name: str = "embedding") -> tuple[torch.Tensor, list[int]]:
-    """The embedding manifold: rows of the embedding matrix for every
-    vocabulary id, read by running the `input_ids -> embedding_output_name`
-    sublayer forward with each id at sequence position 0 (embedding is
-    tokenwise and position-independent, so the rest of the padded sequence
-    is irrelevant). Returns (states, ids) -- unlike the original HF-hook
-    version there is no tokenizer here to exclude special ids, so callers
-    that need that should filter `ids` themselves (e.g. against a loaded
-    tokenizer's `all_special_ids`)."""
+   
     ensure_base_model(cfg, force=False, verbose=False)
     extra_outputs_path = ensure_extra_outputs(cfg, [embedding_output_name], force=False)
     session = _make_session(extra_outputs_path)

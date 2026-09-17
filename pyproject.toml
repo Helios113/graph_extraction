@@ -23,6 +23,7 @@ dependencies = [
     "scipy>=1.17.1",
     "textual>=8.2.8",
     "torch>=2.13.0",
+    "tqdm>=4.70.0",
     "transformers>=4.57,<4.58",
     "xxhash>=4.0.1",
 ]
@@ -37,7 +38,6 @@ compile-bytecode = false
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
-    "pytest>=9.1.1",
     "ruff>=0.16.2",
     "ty>=0.0.71",
 ]

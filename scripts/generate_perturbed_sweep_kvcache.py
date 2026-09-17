@@ -172,6 +172,7 @@ def run_perturbed_sweep_kvcache(
     candidate_batch: int,
     no_push: bool = False,
     defer_push: bool = False,
+    auto_delete: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
     max_in_flight: int = 1,
@@ -187,7 +188,8 @@ def run_perturbed_sweep_kvcache(
         try:
             _run_perturbed_sweep_kvcache_once(
                 cfg, base_seqs, out_dir, n_samples, layer_idx, boundary, flush_every, shard_rows,
-                candidate_batch, no_push=no_push, defer_push=defer_push, project_root=project_root,
+                candidate_batch, no_push=no_push, defer_push=defer_push, auto_delete=auto_delete,
+                project_root=project_root,
                 upload_workers=upload_workers, max_in_flight=max_in_flight,
                 n_vocab_sample=n_vocab_sample, vocab_sample_seed=vocab_sample_seed,
             )
@@ -217,6 +219,7 @@ def _run_perturbed_sweep_kvcache_once(
     candidate_batch: int,
     no_push: bool = False,
     defer_push: bool = False,
+    auto_delete: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
     max_in_flight: int = 1,
@@ -276,6 +279,7 @@ def _run_perturbed_sweep_kvcache_once(
         },
         no_push=no_push,
         defer_push=defer_push,
+        auto_delete=auto_delete,
         project_root=project_root,
         pusher=pusher,
         max_in_flight=max_in_flight,
@@ -361,6 +365,12 @@ def main() -> None:
     )
     parser.add_argument("--no-push", action="store_true")
     parser.add_argument("--defer-push", action="store_true")
+    parser.add_argument(
+        "--auto-delete", action="store_true",
+        help="Delete a shard's local scratch copy once its upload is confirmed pushed "
+        "(default: keep it on local scratch disk after pushing). Ignored if --no-push "
+        "is also set.",
+    )
     parser.add_argument("--upload-workers", type=int, default=4)
     parser.add_argument("--max-in-flight", type=int, default=1)
     parser.add_argument("--n-vocab-sample", type=int, default=None)
@@ -381,6 +391,7 @@ def main() -> None:
         candidate_batch=args.candidate_batch,
         no_push=args.no_push,
         defer_push=args.defer_push,
+        auto_delete=args.auto_delete,
         upload_workers=args.upload_workers,
         max_in_flight=args.max_in_flight,
         n_vocab_sample=args.n_vocab_sample,

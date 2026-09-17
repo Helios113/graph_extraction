@@ -46,8 +46,8 @@ n_val = len(ids) // 10
 tr_i, va_i = perm[:-n_val], perm[-n_val:]
 
 # 2. two independent manifolds (source and destination); nothing about the model enters here
-M_in = gm.GlobalManifold(latent_dim=a.latent_dim).fit(X_in[tr_i], epochs=a.epochs, X_val=X_in[va_i])
-M_out = gm.GlobalManifold(latent_dim=a.latent_dim).fit(X_out[tr_i], epochs=a.epochs, X_val=X_out[va_i])
+M_in = gm.fit(gm.GlobalManifold(latent_dim=a.latent_dim), X_in[tr_i], epochs=a.epochs, X_val=X_in[va_i])
+M_out = gm.fit(gm.GlobalManifold(latent_dim=a.latent_dim), X_out[tr_i], epochs=a.epochs, X_val=X_out[va_i])
 
 # 3. sample the source manifold, push through the real ONNX sublayer src -> dst, validate at both ends
 X_sample, info = M_in.sample(a.n, alpha=a.alpha, seed=0)

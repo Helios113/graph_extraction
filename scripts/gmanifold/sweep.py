@@ -70,16 +70,16 @@ def run_location(
     dim = gm.intrinsic_dimension(Xtr)
     kernel = gm.KernelScore(Xtr)
     report = dict(loc=loc, dim=dim, fits=[], alpha=[])
-    for m in latent_dims:
-        T = gm.TangentCharts(Xtr, m)
+    for latent_dim in latent_dims:
+        T = gm.TangentCharts(Xtr, latent_dim)
         for seed in seeds:
             t0 = time.time()
-            M = gm.GlobalManifold(latent_dim=m, device=DEVICE).fit(Xtr, epochs=epochs, X_val=Xva, seed=seed)
+            M = gm.fit(gm.GlobalManifold(latent_dim=latent_dim, device=DEVICE), Xtr, epochs=epochs, X_val=Xva, seed=seed)
             jr = M.jacobian_rank()
             report["fits"].append(dict(
-                m=m, seed=seed, spacing_unit=M.spacing_unit, hub_share=M.hub_share,
+                m=latent_dim, seed=seed, spacing_unit=M.spacing_unit, hub_share=M.hub_share,
                 val_recon=M.history[-1]["val_recon_over_spacing"], train_recon=M.history[-1]["recon"],
-                rank=jr["rank_median"], jac_sv=jr["singular_values"][:m].tolist(),
+                rank=jr["rank_median"], jac_sv=jr["singular_values"][:latent_dim].tolist(),
                 seconds=time.time() - t0,
             ))
             bands = gm.support_report(M, Xva, Xva, kernel, T)  # held-out real, 0.5x, 1x noise
@@ -87,7 +87,7 @@ def run_location(
                 x, info = M.sample(n_samples, alpha=alpha, auto_tau=True, seed=seed)
                 rep = gm.support_report(M, x, kernel=kernel, tangent=T)["samples"]
                 report["alpha"].append(dict(
-                    m=m, seed=seed, alpha=alpha, ess=info["ess"], tau=info["tau"],
+                    m=latent_dim, seed=seed, alpha=alpha, ess=info["ess"], tau=info["tau"],
                     anchor_participation=info["anchor_participation"],
                     multiplicity=float(info["multiplicity"].float().mean()),
                     coverage=M.coverage(x), **rep,
@@ -115,7 +115,7 @@ def run_propagation(
     for tokenwise sublayer pairs declared in cfg.sublayers -- see
     gmanifold/onnx_transformer.py's make_map docstring."""
     Xtr, Xva = X_out[tr_i].to(DEVICE), X_out[va_i].to(DEVICE)
-    M_out = gm.GlobalManifold(latent_dim=latent_dim, device=DEVICE).fit(Xtr, epochs=epochs, X_val=Xva, seed=seed)
+    M_out = gm.fit(gm.GlobalManifold(latent_dim=latent_dim, device=DEVICE), Xtr, epochs=epochs, X_val=Xva, seed=seed)
     T_out = gm.TangentCharts(Xtr, latent_dim)
     k_out = gm.KernelScore(Xtr)
     map_fn = tr.make_map(cfg, src, dst)
@@ -125,7 +125,7 @@ def run_propagation(
     for alpha in alphas:
         x, _ = M_in.sample(n_samples, alpha=alpha, auto_tau=True, seed=seed)
         rows[f"sample alpha={alpha}"] = gm.support_report(M_out, map_fn(x), kernel=k_out, tangent=T_out)["samples"]
-    rows["real held-out images"] = gm.support_report(M_out, map_fn(M_in.X[va_i]), kernel=k_out, tangent=T_out)["samples"]
+    rows["real held-out images"] = gm.support_report(M_out, map_fn(M_in.states[va_i]), kernel=k_out, tangent=T_out)["samples"]
     return dict(src=src, dst=dst, rows=rows, bands=bands)
 
 
@@ -208,7 +208,8 @@ def main() -> None:
             continue
         X_in, ids_in = states[src]
         Xtr_in = X_in[tr_i].to(DEVICE)
-        M_in = gm.GlobalManifold(latent_dim=args.latent_dims[0], device=DEVICE).fit(
+        M_in = gm.fit(
+            gm.GlobalManifold(latent_dim=args.latent_dims[0], device=DEVICE),
             Xtr_in, epochs=args.epochs, X_val=X_in[va_i].to(DEVICE), seed=args.seeds[0],
         )
 

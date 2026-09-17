@@ -116,6 +116,11 @@ class ShardedLayerWriter:
     execute.remote_storage.push. Set this when the caller already knows any
     existing remote content for this layer is stale (e.g. --overwrite-remote
     on a script that just regenerated its output from scratch)."""
+    auto_delete: bool = False
+    """When False, a shard's local scratch file is kept after its upload is
+    confirmed, instead of being deleted -- see execute.remote_storage.push.
+    Ignored if `no_push` is set (nothing is uploaded, so nothing to delete
+    either way)."""
     project_root: str = "."
     pusher: AsyncPusher | None = None
     """Shared AsyncPusher to upload shards through. `pusher` is typically
@@ -276,8 +281,8 @@ class ShardedLayerWriter:
         future, shard_entry = self._pending_uploads.pop(0)
         future.result()  # raises if the upload failed -- surface it here, not silently
         print(f"[sharded_writer] {self.layer_key}: shard {shard_entry['shard_idx']} "
-              f"(rows {shard_entry['row_start']}-{shard_entry['row_end']}) "
-              "pushed to remote and deleted locally")
+              f"(rows {shard_entry['row_start']}-{shard_entry['row_end']}) pushed to remote"
+              + (" and deleted locally" if self.auto_delete else " (kept locally)"))
         shard_entry["pushed"] = True
         self._save_progress()
 
@@ -294,6 +299,7 @@ class ShardedLayerWriter:
         self._wait_pending_uploads(keep=self.max_in_flight - 1)
         future = self.pusher.submit(
             local_path, virtual_path=shard_entry["virtual_path"], force=self.force_push,
+            auto_delete=self.auto_delete,
         )
         self._pending_uploads.append((future, shard_entry))
         print(f"[sharded_writer] {self.layer_key}: shard {shard_entry['shard_idx']} "
@@ -408,12 +414,20 @@ def load_shard_rows(
     project_root: str,
     layer_key: str,
     dataset_names: list[str] | None = None,
+    pull_dir: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Loader-side helper: read a layer's manifest, `ensure_local` (pull from
     remote store, if not already local) every shard, and concatenate each
     requested dataset across shards in row order. For layers whose shards
     were kept locally (--no-push), reads them directly from scratch instead.
-    """
+
+    `pull_dir`: pull missing shards into this directory instead of under
+    `project_root` (NFS) -- e.g. node-local scratch disk, for a caller that
+    only needs the rows transiently and doesn't want to grow shared NFS
+    storage for a full multi-GB shard. Checked for an already-pulled copy
+    before re-pulling, same as the NFS-default path via ensure_local's own
+    existence check. Defaults to None (the original NFS-under-project_root
+    behavior, unchanged)."""
     from execute.remote_storage import ensure_local
 
     manifest_path = os.path.join(project_root, layer_key + ".manifest.json")
@@ -428,8 +442,7 @@ def load_shard_rows(
 
     for shard in sorted(manifest["shards"], key=lambda s: s["shard_idx"]):
         if shard["pushed"]:
-            ensure_local(shard["virtual_path"])  # relative to PROJECT_ROOT, resolved there
-            local_path = os.path.join(project_root, shard["virtual_path"])
+            local_path = ensure_local(shard["virtual_path"], dest_dir=pull_dir)
         else:
             local_path = os.path.join(
                 _scratch_root(), layer_key, f"shard_{shard['shard_idx']:05d}.h5"

@@ -1,141 +1,146 @@
 """GlobalManifold: learn G: R^m -> R^D from real states X and sample ~uniformly (w.r.t. manifold volume)
 near the observed support. Knows nothing about Transformers."""
+
 from __future__ import annotations
 
 import math
+from typing import Any, Sequence
 
 import torch
-from torch import nn
+from torch import Tensor, nn
+from tqdm.auto import tqdm
 
 from .geometry import knn, uniform_ball
 
 
-def _mlp(sizes, act=nn.SiLU):
-    layers = []
+def _mlp(sizes: Sequence[int], act: type[nn.Module] = nn.SiLU) -> nn.Sequential:
+    layers: list[nn.Module] = []
     for a, b in zip(sizes[:-1], sizes[1:]):
-        layers += [nn.Linear(a, b), act()]
+        layers += [
     return nn.Sequential(*layers[:-1])
 
 
 class GlobalManifold(nn.Module):
     """Encoder E: D -> hidden -> m, decoder G: m -> reversed(hidden) -> D (SiLU).
     Preprocessing: subtract the training centre, divide by one global RMS scale (a similarity, so Euclidean
-    geometry is preserved). The manifold ansatz is G(Omega) with Omega = union of latent balls B(z_i, alpha*rho_i)."""
+    geometry is preserved). The manifold ansatz is G(Omega) with Omega = union of latent balls
+    B(z_i, alpha*latent_scale_i)."""
 
-    def __init__(self, latent_dim: int, hidden=(512, 256), K: int = 32, K_s: int = 8, device=None):
+    def __init__(
+        self,
+        latent_dim: int,
+        # Size of MLP
+        hidden: Sequence[int] = (512, 256),
+        n_neighbors: int = 32,
+        n_scale_neighbors: int = 8,
+        device: torch.device | str | None = None,
+    ) -> None:
         super().__init__()
-        self.m, self.hidden, self.K, self.K_s = int(latent_dim), tuple(hidden), K, K_s
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.enc = self.dec = None
+        self.latent_dim, self.hidden, self.n_neighbors, self.n_scale_neighbors = (
+            int(latent_dim),
+            tuple(hidden),
+            n_neighbors,
+            n_scale_neighbors,
+        )
+        self.device = torch.device(
+            device or ("cuda" if torch.cuda.is_available() else "cpu"),
+        )
+        self.encoder = self.encoder = nn.Sequential(
+                *[layer for a, b in zip(sizes[:-1], sizes[1:]) for layer in (nn.Linear(a, b), act())][:-1]
+            )
+        self.decoder: nn.Sequential | None = None
+        
         self.register_buffer("center", torch.zeros(0))
         self.register_buffer("scale", torch.ones(()))
-        self.register_buffer("Z", torch.zeros(0, self.m))     # latent codes of the fitted states
-        self.register_buffer("rho", torch.zeros(0))           # local latent scale (K_s-th latent neighbour)
-        self.register_buffer("spacing", torch.zeros(0))       # local ambient spacing (K_s-th neighbour) of X
-        self.X = None
-        self.history = []
-        self.spacing_unit = "anchor"                          # 'anchor': divide by the nearest anchor's spacing; 'global': by the median
-        self.hub_share = 0.0                                  # share of points whose nearest neighbour is one of the 5 most common anchors
+        self.register_buffer(
+            "latent_codes", torch.zeros(0, self.latent_dim)
+        )  # latent codes of the fitted states
+        self.register_buffer(
+            "latent_scale", torch.zeros(0)
+        )  # local latent scale (n_scale_neighbors-th latent neighbour)
+        self.register_buffer(
+            "ambient_spacing", torch.zeros(0)
+        )  # local ambient spacing (n_scale_neighbors-th neighbour) of states
+        self.states: Tensor | None = None
+        self.history: list[dict[str, Any]] = []
+        self.spacing_unit = "anchor"  # 'anchor': divide by the nearest anchor's spacing; 'global': by the median
+        self.hub_share = 0.0  # share of points whose nearest neighbour is one of the 5 most common anchors
 
     # ------------------------------------------------------------------ maps
-    def encode(self, x):
-        return self.enc((x.to(self.device) - self.center) / self.scale)
+    def encode(self, x: Tensor) -> Tensor:
+        assert self.encoder is not None
+        return self.encoder((x.to(self.device) - self.center) / self.scale)
 
-    def decode(self, z):
-        return self.dec(z.to(self.device)) * self.scale + self.center
+    def decode(self, z: Tensor) -> Tensor:
+        assert self.decoder is not None
+        return self.decoder(z.to(self.device)) * self.scale + self.center
 
-    def project(self, x):
+    def project(self, x: Tensor) -> Tensor:
         return self.decode(self.encode(x))
 
-    def jacobian(self, z, chunk=1024):
+    def jacobian(self, z: Tensor, chunk: int = 1024) -> Tensor:
         """J_G(z) in ambient units, (B, D, m)."""
-        f = torch.func.vmap(torch.func.jacfwd(self.dec))
-        return torch.cat([f(z[s:s + chunk]) for s in range(0, len(z), chunk)]) * self.scale
+        assert self.decoder is not None
+        f = torch.func.vmap(torch.func.jacfwd(self.decoder))
+        return (
+            torch.cat([f(z[s : s + chunk]) for s in range(0, len(z), chunk)])
+            * self.scale
+        )
 
-    def log_volume(self, z, chunk=1024):
+    # To get uniform sampling
+    def log_volume(self, z: Tensor, chunk: int = 1024) -> Tensor:
         """0.5 * log det(J^T J): log of the Riemannian volume element of the chart at z."""
-        out = []
+        out: list[Tensor] = []
         for s in range(0, len(z), chunk):
-            J = self.jacobian(z[s:s + chunk])
+            J = self.jacobian(z[s : s + chunk])
             out.append(0.5 * torch.linalg.slogdet(J.transpose(1, 2) @ J)[1])
         return torch.cat(out)
 
-    # ------------------------------------------------------------------ fitting
-    def fit(self, X, epochs=300, batch_size=512, lr=2e-3, lam_geom=0.1, lam_curv=1e-3, curv_delta=0.5, seed=0,
-            X_val=None, log_every=50, verbose=False):
-        """L = recon + lam_geom * local-distance preservation (K Euclidean neighbours) + lam_curv * second
-        differences along random latent directions. The geometry term ties latent distances to ambient
-        distances; that is what makes the latent balls (and alpha) meaningful."""
-        torch.manual_seed(seed)
-        X = X.to(self.device).float()
-        D, N = X.shape[1], len(X)
-        self.enc, self.dec = _mlp([D, *self.hidden, self.m]).to(self.device), _mlp([self.m, *reversed(self.hidden), D]).to(self.device)
-        self.center = X.mean(0)
-        self.scale = ((X - self.center) ** 2).sum(1).mean().sqrt()
-        Xn = (X - self.center) / self.scale
-        dist, idx = knn(X, self.K)
-        self.spacing = dist[:, self.K_s - 1]
-        self.X = X
-        counts = torch.bincount(idx[:, 0], minlength=N).float()
-        self.hub_share = float(counts.sort(descending=True).values[:5].sum() / N)
-        if float(self.spacing[idx[:, 0]].median()) < 0.5 * float(self.spacing.median()):   # hub-dominated cloud: anchors' spacings are not representative
-            self.spacing_unit = "global"
-            print(f"[gmanifold] hub-dominated cloud (top-5 anchors are the nearest neighbour of {self.hub_share:.0%} of the points): "
-                  "distances are reported in units of the global median spacing")
-        opt = torch.optim.Adam(self.parameters(), lr=lr)
-        sched = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=epochs * math.ceil(N / batch_size), pct_start=0.05)
-        self.train()
-        for ep in range(epochs):
-            perm, losses = torch.randperm(N, device=self.device), {}
-            for s in range(0, N, batch_size):
-                b = perm[s:s + batch_size]
-                x, nb = Xn[b], Xn[idx[b]]                                     # (B,D), (B,K,D)
-                z, zn = self.enc(x), self.enc(nb.reshape(-1, D)).reshape(len(b), self.K, self.m)
-                xr = self.dec(z)
-                dx, dz = (nb - x[:, None]).norm(dim=2), (zn - z[:, None]).norm(dim=2)
-                terms = {"recon": ((xr - x) ** 2).sum(1).mean(), "geom": ((dz - dx) ** 2).mean() / (dx ** 2).mean()}
-                if lam_curv > 0:
-                    d = torch.randn_like(z); d = d / d.norm(dim=1, keepdim=True) * (curv_delta * dz.detach().mean(1, keepdim=True))
-                    sec = self.dec(z + d) - 2 * xr + self.dec(z - d)
-                    terms["curv"] = ((sec ** 2).sum(1) / (d ** 2).sum(1)).mean()
-                loss = terms["recon"] + lam_geom * terms["geom"] + lam_curv * terms.get("curv", 0.0)
-                opt.zero_grad(set_to_none=True); loss.backward(); opt.step(); sched.step()
-                for k, v in terms.items():
-                    losses[k] = losses.get(k, 0.0) + float(v.detach())
-            rec = {k: v / math.ceil(N / batch_size) for k, v in losses.items()} | {"epoch": ep}
-            if X_val is not None and (ep % log_every == 0 or ep == epochs - 1):
-                rec["val_recon_over_spacing"] = float(self.recon_error(X_val).median())
-            self.history.append(rec)
-            if verbose and (ep % log_every == 0 or ep == epochs - 1):
-                print({k: round(v, 4) if isinstance(v, float) else v for k, v in rec.items()})
-        self.eval()
-        with torch.no_grad():
-            self.Z = self.encode(X)
-            self.rho = knn(self.Z, self.K_s)[0][:, self.K_s - 1]
-        return self
-
     # ------------------------------------------------------------------ sampling
-    def radii(self, alpha, radius="global"):
+    def radii(self, alpha: float, radius: str = "global") -> Tensor:
         """Latent ball radii: 'global' = alpha x median rho for every anchor (a uniform-thickness neighbourhood of
         the data; robust to outliers), 'local' = alpha x rho_i per anchor (the union of local balls is then dominated
         by the largest balls, since ball volume scales like rho^m)."""
-        rho = self.rho if radius == "local" else self.rho.median().expand_as(self.rho)
-        return alpha * rho
+        latent_scale = (
+            self.latent_scale
+            if radius == "local"
+            else self.latent_scale.median().expand_as(self.latent_scale)
+        )
+        return alpha * latent_scale
 
     @torch.no_grad()
-    def support_logq(self, z, R, anchor_logp, chunk=4096):
+    def support_logq(
+        self, z: Tensor, R: Tensor, anchor_logp: Tensor, chunk: int = 4096
+    ) -> tuple[Tensor, Tensor]:
         """Exact log-density of the latent-ball mixture proposal (up to a constant) and ball multiplicity."""
-        logq, cnt = [], []
+        logq: list[Tensor] = []
+        cnt: list[Tensor] = []
         for s in range(0, len(z), chunk):
-            d = torch.cdist(z[s:s + chunk], self.Z)
+            d = torch.cdist(z[s : s + chunk], self.latent_codes)
             inside = d <= R * (1 + 1e-5)
-            term = torch.where(inside, anchor_logp - self.m * R.log(), torch.full_like(d, -float("inf")))
-            logq.append(term.logsumexp(1)); cnt.append(inside.sum(1))
+            term = torch.where(
+                inside,
+                anchor_logp - self.latent_dim * R.log(),
+                torch.full_like(d, -float("inf")),
+            )
+            logq.append(term.logsumexp(1))
+            cnt.append(inside.sum(1))
         return torch.cat(logq), torch.cat(cnt)
 
     @torch.no_grad()
-    def sample(self, n, alpha=0.3, radius="global", n_candidates=None, anchor_power=None, reweight=True, tau=1.0, auto_tau=False,
-               min_ess_frac=0.05, seed=None):
+    def sample(
+        self,
+        n: int,
+        alpha: float = 0.3,
+        radius: str = "global",
+        n_candidates: int | None = None,
+        anchor_power: float | None = None,
+        reweight: bool = True,
+        tau: float = 1.0,
+        auto_tau: bool = False,
+        min_ess_frac: float = 0.05,
+        seed: int | None = None,
+    ) -> tuple[Tensor, dict[str, Any]]:
         """Approximately volume-uniform samples on G(Omega), Omega = union_i B(z_i, R_i) with R_i from `radii`.
         1. anchor i ~ P(i) ∝ R_i^p (p = m: the proposal is then uniform on Omega up to ball multiplicity);
         2. z uniform in B(z_i, R_i);  3. importance weight w = sqrt(det J^T J)^tau / q(z) with the exact mixture
@@ -148,78 +153,144 @@ class GlobalManifold(nn.Module):
         if seed is not None:
             g.manual_seed(seed)
         n_c = n_candidates or 8 * n
-        p = self.m if anchor_power is None else anchor_power
+        p = self.latent_dim if anchor_power is None else anchor_power
         R = self.radii(alpha, radius)
-        anchor_logp = p * R.log(); anchor_logp = anchor_logp - anchor_logp.logsumexp(0)
+        anchor_logp = p * R.log()
+        anchor_logp = anchor_logp - anchor_logp.logsumexp(0)
         i = torch.multinomial(anchor_logp.exp(), n_c, replacement=True, generator=g)
-        z = self.Z[i] + uniform_ball(n_c, self.m, R[i], g, self.device)
+        z = self.latent_codes[i] + uniform_ball(n_c, self.latent_dim, R[i], g, self.device)
         logq, cnt = self.support_logq(z, R, anchor_logp)
-        logvol = torch.nan_to_num(self.log_volume(z), nan=-float("inf"), posinf=-float("inf")) if reweight else torch.zeros(n_c, device=self.device)
+        logvol = (
+            torch.nan_to_num(
+                self.log_volume(z), nan=-float("inf"), posinf=-float("inf")
+            )
+            if reweight
+            else torch.zeros(n_c, device=self.device)
+        )
 
-        def weights(t):
-            lw = t * logvol - logq if reweight else torch.zeros(n_c, device=self.device)   # no reweighting = the proposal itself
-            lw = torch.nan_to_num(lw, nan=-float("inf"), posinf=-float("inf")); return (lw - lw.logsumexp(0)).exp()
+        def weights(t: float) -> Tensor:
+            lw = (
+                t * logvol - logq if reweight else torch.zeros(n_c, device=self.device)
+            )  # no reweighting = the proposal itself
+            lw = torch.nan_to_num(lw, nan=-float("inf"), posinf=-float("inf"))
+            return (lw - lw.logsumexp(0)).exp()
 
-        ess = lambda w: float(1 / (w ** 2).sum())
-        w = weights(tau); info = dict(tau=tau, tau_suggested=tau, warning=None)
-        if reweight and min_ess_frac and ess(w) < min_ess_frac * n_c:        # the checker
+        ess = lambda w: float(1 / (w**2).sum())
+        w = weights(tau)
+        info: dict[str, Any] = dict(tau=tau, tau_suggested=tau, warning=None)
+        if reweight and min_ess_frac and ess(w) < min_ess_frac * n_c:  # the checker
             lo, hi = 0.0, tau
-            for _ in range(20):                                               # largest tempering exponent meeting the ESS floor
-                mid_ = 0.5 * (lo + hi); lo, hi = (mid_, hi) if ess(weights(mid_)) >= min_ess_frac * n_c else (lo, mid_)
+            for _ in range(20):  # largest tempering exponent meeting the ESS floor
+                mid_ = 0.5 * (lo + hi)
+                lo, hi = (
+                    (mid_, hi)
+                    if ess(weights(mid_)) >= min_ess_frac * n_c
+                    else (lo, mid_)
+                )
             top = float(w.sort(descending=True).values[:10].sum())
             info["tau_suggested"] = lo
             if auto_tau:
-                w = weights(lo); info["tau"] = lo
+                w = weights(lo)
+                info["tau"] = lo
             else:
-                info["warning"] = (f"degenerate importance weights: ESS {ess(w):.0f} of {n_c} candidates, the 10 heaviest carry {top:.0%} of the mass; "
-                                   f"the samples will be near-copies of a few points. Temper the volume weights with tau≈{lo:.2f} "
-                                   f"(sample(..., tau={lo:.2f}) or auto_tau=True), and check the fit (held-out recon, latent dim, outlier states).")
+                info["warning"] = (
+                    f"degenerate importance weights: ESS {ess(w):.0f} of {n_c} candidates, the 10 heaviest carry {top:.0%} of the mass; "
+                    f"the samples will be near-copies of a few points. Temper the volume weights with tau≈{lo:.2f} "
+                    f"(sample(..., tau={lo:.2f}) or auto_tau=True), and check the fit (held-out recon, latent dim, outlier states)."
+                )
                 print("[gmanifold] WARNING " + info["warning"])
         pick = torch.multinomial(w, n, replacement=True, generator=g)
-        info.update(z=z[pick], anchor=i[pick], multiplicity=cnt[pick], ess=ess(w), alpha=alpha, radius=radius, n_candidates=n_c,
-                    anchor_participation=float(1 / (anchor_logp.exp() ** 2).sum()))
+        info.update(
+            z=z[pick],
+            anchor=i[pick],
+            multiplicity=cnt[pick],
+            ess=ess(w),
+            alpha=alpha,
+            radius=radius,
+            n_candidates=n_c,
+            anchor_participation=float(1 / (anchor_logp.exp() ** 2).sum()),
+        )
         return self.decode(z[pick]), info
 
     # ------------------------------------------------------------------ diagnostics
-    def unit(self, j):
+    def unit(self, j: Tensor) -> Tensor:
         """Length unit for points whose nearest fitted state is j: that state's spacing, or the global median."""
-        return self.spacing[j] if self.spacing_unit == "anchor" else self.spacing.median().expand(len(j))
+        return (
+            self.ambient_spacing[j]
+            if self.spacing_unit == "anchor"
+            else self.ambient_spacing.median().expand(len(j))
+        )
 
+    
     @torch.no_grad()
-    def recon_error(self, Y):
+    def recon_error(self, Y: Tensor) -> Tensor:
         """||G(E(y)) - y|| in spacing units (the off-manifold distance to the ansatz)."""
         Y = Y.to(self.device).float()
-        j = knn(self.X, 1, Y)[1][:, 0]
+        j = knn(self.states, 1, Y)[1][:, 0]
         return (self.project(Y) - Y).norm(dim=1) / self.unit(j)
 
     @torch.no_grad()
-    def nearest_real(self, Y):
+    def nearest_real(self, Y: Tensor) -> Tensor:
         """Distance from Y to the nearest fitted real state, in spacing units."""
-        d, j = knn(self.X, 1, Y.to(self.device).float())
+        d, j = knn(self.states, 1, Y.to(self.device).float())
         return d[:, 0] / self.unit(j[:, 0])
 
     @torch.no_grad()
-    def coverage(self, Y):
+    def coverage(self, Y: Tensor) -> float:
         """Fraction of fitted real states that have a sample within one spacing unit."""
-        d = knn(Y.to(self.device).float(), 1, self.X)[0][:, 0]
-        return float((d / self.unit(torch.arange(len(self.X), device=self.device)) <= 1).float().mean())
+        assert self.states is not None
+        d = knn(Y.to(self.device).float(), 1, self.states)[0][:, 0]
+        return float(
+            (d / self.unit(torch.arange(len(self.states), device=self.device)) <= 1)
+            .float()
+            .mean()
+        )
 
     @torch.no_grad()
-    def jacobian_rank(self, n=256, tol=1e-3):
-        sv = torch.linalg.svdvals(self.jacobian(self.Z[:n]))
-        return dict(rank_median=float((sv > tol * sv[:, :1]).sum(1).float().median()), singular_values=sv.mean(0).cpu())
+    def jacobian_rank(self, n: int = 256, tol: float = 1e-3) -> dict[str, Any]:
+        sv = torch.linalg.svdvals(self.jacobian(self.latent_codes[:n]))
+        return dict(
+            rank_median=float((sv > tol * sv[:, :1]).sum(1).float().median()),
+            singular_values=sv.mean(0).cpu(),
+        )
 
     # ------------------------------------------------------------------ persistence
-    def save(self, path):
-        torch.save(dict(m=self.m, hidden=self.hidden, K=self.K, K_s=self.K_s, D=self.X.shape[1], X=self.X.cpu(),
-                        state=self.state_dict(), history=self.history, spacing_unit=self.spacing_unit, hub_share=self.hub_share), path)
+    def save(self, path: str) -> None:
+        assert self.states is not None
+        # States is the bigeest issue
+        torch.save(
+            dict(
+                latent_dim=self.latent_dim,
+                hidden=self.hidden,
+                n_neighbors=self.n_neighbors,
+                n_scale_neighbors=self.n_scale_neighbors,
+                ambient_dim=self.states.shape[1],
+                states=self.states.cpu(),
+                state=self.state_dict(),
+                history=self.history,
+                spacing_unit=self.spacing_unit,
+                hub_share=self.hub_share,
+            ),
+            path,
+        )
 
     @classmethod
-    def load(cls, path, device=None):
-        s = torch.load(path, map_location="cpu")
-        M = cls(s["m"], s["hidden"], s["K"], s["K_s"], device)
-        M.enc, M.dec = _mlp([s["D"], *M.hidden, M.m]).to(M.device), _mlp([M.m, *reversed(M.hidden), s["D"]]).to(M.device)
-        M.Z, M.rho, M.spacing, M.center = (torch.zeros_like(s["state"][k]) for k in ("Z", "rho", "spacing", "center"))
-        M.load_state_dict(s["state"]); M.to(M.device); M.X = s["X"].to(M.device); M.history = s["history"]
-        M.spacing_unit, M.hub_share = s.get("spacing_unit", "anchor"), s.get("hub_share", 0.0)
+    def load(cls, path: str, device: torch.device | str | None = None) -> GlobalManifold:
+        s: dict[str, Any] = torch.load(path, map_location="cpu")
+        M = cls(s["latent_dim"], s["hidden"], s["n_neighbors"], s["n_scale_neighbors"], device)
+        M.encoder = _mlp([s["ambient_dim"], *M.hidden, M.latent_dim]).to(M.device)
+        M.decoder = _mlp([M.latent_dim, *reversed(M.hidden), s["ambient_dim"]]).to(M.device)
+        M.latent_codes, M.latent_scale, M.ambient_spacing, M.center = (
+            torch.zeros_like(s["state"][k])
+            for k in ("latent_codes", "latent_scale", "ambient_spacing", "center")
+        )
+        M.load_state_dict(s["state"])
+        M.to(M.device)
+        M.states = s["states"].to(M.device)
+        M.history = s["history"]
+        M.spacing_unit, M.hub_share = (
+            s.get("spacing_unit", "anchor"),
+            s.get("hub_share", 0.0),
+        )
         return M.eval()
+

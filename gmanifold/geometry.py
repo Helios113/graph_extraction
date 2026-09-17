@@ -1,15 +1,21 @@
 """Small Euclidean helpers (no normalisation to the sphere anywhere)."""
+import math
+
 import torch
+from tqdm.auto import tqdm
 
 
 @torch.no_grad()
-def knn(X, k, Q=None, chunk=4096):
+def knn(X, k, Q=None, chunk=4096, progress=False):
     """k nearest neighbours of Q (default X itself, self excluded) in X -> (dist, idx), each (n, k)."""
     self_q = Q is None
     Q = X if self_q else Q
     kk = min(k + int(self_q), len(X))
     ds, js = [], []
-    for s in range(0, len(Q), chunk):
+    steps = range(0, len(Q), chunk)
+    if progress:
+        steps = tqdm(steps, desc="knn", total=math.ceil(len(Q) / chunk))
+    for s in steps:
         d = torch.cdist(Q[s:s + chunk], X)
         if self_q:
             d[torch.arange(d.shape[0]), torch.arange(s, s + d.shape[0])] = float("inf")

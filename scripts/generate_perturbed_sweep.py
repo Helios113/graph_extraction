@@ -108,6 +108,7 @@ def run_perturbed_sweep(
     shard_rows: int,
     no_push: bool = False,
     defer_push: bool = False,
+    auto_delete: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
     max_in_flight: int = 1,
@@ -142,7 +143,8 @@ def run_perturbed_sweep(
         try:
             _run_perturbed_sweep_once(
                 cfg, base_seqs, out_dir, n_samples, flush_every, shard_rows,
-                no_push=no_push, defer_push=defer_push, project_root=project_root,
+                no_push=no_push, defer_push=defer_push, auto_delete=auto_delete,
+                project_root=project_root,
                 upload_workers=upload_workers, max_in_flight=max_in_flight, vocab_ids=vocab_ids,
             )
             break
@@ -173,6 +175,7 @@ def _run_perturbed_sweep_once(
     shard_rows: int,
     no_push: bool = False,
     defer_push: bool = False,
+    auto_delete: bool = False,
     project_root: str = ".",
     upload_workers: int = 4,
     max_in_flight: int = 1,
@@ -269,6 +272,7 @@ def _run_perturbed_sweep_once(
                    "output_name": output_name},
             no_push=no_push,
             defer_push=defer_push,
+            auto_delete=auto_delete,
             project_root=project_root,
             pusher=pusher,
             max_in_flight=max_in_flight,
@@ -390,7 +394,8 @@ def main() -> None:
         type=int,
         default=2_000_000,
         help="Rows per shard -- each shard is written to local scratch disk, "
-        "then pushed to the remote store and deleted locally as soon as it's full",
+        "then pushed to the remote store as soon as it's full (see --auto-delete "
+        "for whether the local copy is deleted after that push)",
     )
     parser.add_argument(
         "--no-push",
@@ -408,6 +413,13 @@ def main() -> None:
         "runs -- only use this on nodes with enough local scratch headroom to hold a full "
         "layer's shards at once (e.g. mauao, not ruapehu -- see CLAUDE.md). Ignored if "
         "--no-push is also set.",
+    )
+    parser.add_argument(
+        "--auto-delete",
+        action="store_true",
+        help="Delete a shard's local scratch copy once its upload is confirmed pushed "
+        "(default: keep it on local scratch disk after pushing). Ignored if --no-push "
+        "is also set.",
     )
     parser.add_argument(
         "--upload-workers",
@@ -455,6 +467,7 @@ def main() -> None:
         shard_rows=args.shard_rows,
         no_push=args.no_push,
         defer_push=args.defer_push,
+        auto_delete=args.auto_delete,
         upload_workers=args.upload_workers,
         max_in_flight=args.max_in_flight,
         config_path=args.config,

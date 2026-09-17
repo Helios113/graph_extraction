@@ -41,7 +41,7 @@ def support_report(M, samples, X_heldout=None, kernel=None, tangent=None, noise=
         Xh = X_heldout.to(M.device).float()
         out["held-out real"] = row(Xh)
         g = torch.Generator(device=M.device).manual_seed(seed)
-        j = knn(M.X, 1, Xh)[1][:, 0]
+        j = knn(M.states, 1, Xh)[1][:, 0]
         for f in noise:
             n = torch.randn(Xh.shape, device=M.device, generator=g)
             out[f"real + {f:g}x noise"] = row(Xh + n / n.norm(dim=1, keepdim=True) * (f * M.unit(j))[:, None])

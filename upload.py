@@ -70,24 +70,38 @@ def load_config():
 
 def connect(config):
     transport = paramiko.Transport((config["host"], HETZNER_PORT))
-    # SSH-layer compression costs CPU for ~0 benefit on h5 shards (float32
-    # arrays -- already high-entropy) and was measured as the dominant
-    # bottleneck: ~6 MB/s with compression vs. ~36 MB/s without on this link.
-    transport.use_compression(False)
-    transport.connect(username=config["username"], password=config["password"])
-    return transport
+    try:
+        # SSH-layer compression costs CPU for ~0 benefit on h5 shards (float32
+        # arrays -- already high-entropy) and was measured as the dominant
+        # bottleneck: ~6 MB/s with compression vs. ~36 MB/s without on this link.
+        transport.use_compression(False)
+        transport.connect(username=config["username"], password=config["password"])
+        return transport
+    except BaseException:
+        # transport.connect() spawns a background thread/socket even when it
+        # fails partway (e.g. "EOF during negotiation") -- close explicitly
+        # so a retry loop doesn't leak one zombie Transport per failed
+        # attempt (observed: dozens of leaked sockets/threads after repeated
+        # negotiation failures, which then starves later attempts of
+        # GIL/scheduling time instead of failing fast).
+        transport.close()
+        raise
 
 
 def open_sftp(config, max_retries=5):
     import random
     for attempt in range(max_retries):
+        transport = None
         try:
             if attempt > 0:
                 delay = (2 ** attempt) + random.uniform(0, 1)
                 tprint(f"[sftp] connection attempt {attempt + 1}/{max_retries}, retrying in {delay:.1f}s...")
                 time.sleep(delay)
-            return paramiko.SFTPClient.from_transport(connect(config))
+            transport = connect(config)
+            return paramiko.SFTPClient.from_transport(transport)
         except Exception as e:
+            if transport is not None:
+                transport.close()
             if attempt == max_retries - 1:
                 raise
             tprint(f"[sftp] connect failed ({e}), will retry...")
@@ -597,11 +611,23 @@ def cmd_apply_overrides(config):
 # Pull
 # ---------------------------------------------------------------------------
 
-def _pull_file(ptr, config):
-    """Run in a worker thread."""
+def _pull_file(ptr, config, dest_dir=None):
+    """Run in a worker thread.
+
+    `dest_dir`: directory to pull into instead of PROJECT_ROOT (e.g.
+    node-local scratch disk, so a puller doesn't grow shared NFS storage for
+    data it only needs transiently). The file still lands at
+    ptr["original_path"] relative to `dest_dir`, and its .ptrs/ pointer is
+    still written under PROJECT_ROOT/.ptrs, keyed by the same
+    project-relative `original_path` (via write_ptr's virtual_path) -- so
+    `pull`/`ls`/`clean` keep working against the usual project-relative
+    namespace regardless of where the file actually landed. Defaults to
+    PROJECT_ROOT, unchanged from before this parameter existed.
+    """
     import random
     digest = ptr["hash"]
-    dest = os.path.join(PROJECT_ROOT, ptr["original_path"])
+    root = dest_dir if dest_dir is not None else PROJECT_ROOT
+    dest = os.path.join(root, ptr["original_path"])
     name = ptr["filename"]
 
     if os.path.exists(dest):
@@ -620,8 +646,11 @@ def _pull_file(ptr, config):
     finally:
         sftp.close()
 
-    # update local pointer so mtime cache is valid on next push
-    write_ptr(dest, digest, ptr["size"])
+    # update local pointer so mtime cache is valid on next push -- keyed by
+    # ptr["original_path"] (virtual_path) regardless of dest_dir, so the
+    # pointer's project-relative identity doesn't depend on where the file
+    # physically landed.
+    write_ptr(dest, digest, ptr["size"], virtual_path=ptr["original_path"])
 
     return dest, True
 
