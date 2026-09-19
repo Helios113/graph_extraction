@@ -45,6 +45,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Literal
 
 import h5py
 import numpy as np
@@ -414,7 +415,7 @@ def load_shard_rows(
     project_root: str,
     layer_key: str,
     dataset_names: list[str] | None = None,
-    pull_dir: str | None = None,
+    pull_dir: str | None | Literal[False] = None,
 ) -> dict[str, np.ndarray]:
     """Loader-side helper: read a layer's manifest, `ensure_local` (pull from
     remote store, if not already local) every shard, and concatenate each
@@ -426,9 +427,16 @@ def load_shard_rows(
     only needs the rows transiently and doesn't want to grow shared NFS
     storage for a full multi-GB shard. Checked for an already-pulled copy
     before re-pulling, same as the NFS-default path via ensure_local's own
-    existence check. Defaults to None (the original NFS-under-project_root
-    behavior, unchanged)."""
+    existence check. Defaults to `_scratch_root()` (node-local scratch) --
+    every caller pulls onto scratch, never onto NFS, unless it explicitly
+    opts out with `pull_dir=False` (the old NFS-under-project_root
+    behavior)."""
     from execute.remote_storage import ensure_local
+
+    if pull_dir is None:
+        pull_dir = _scratch_root()
+    elif pull_dir is False:
+        pull_dir = None
 
     manifest_path = os.path.join(project_root, layer_key + ".manifest.json")
     with open(manifest_path) as f:

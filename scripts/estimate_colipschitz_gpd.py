@@ -12,14 +12,15 @@ GPD CDF: F(z) = 1 - (1 + xi*z/sigma)^(-1/xi), fit with loc fixed at 0 (z is
 already an exceedance above 0 by construction).
 
 If the fitted shape xi < 0, the tail has a finite right endpoint at
-sigma/(-xi), giving an estimate of the true infimum:
+sigma/(-xi), giving an estimate of the true infimum. Since exceedances are
+z = u - g, that caps g from below at u - (that endpoint) = u - sigma/(-xi):
 
-    c_hat = u - sigma / xi      (xi < 0, so -sigma/xi > 0)
+    c_hat = u + sigma / xi      (xi < 0, so sigma/xi < 0, i.e. c_hat < u)
 
 A confidence interval for c_hat is obtained via the delta method: the GPD's
 (xi, sigma) MLEs have an asymptotic covariance given by the inverse observed
 Fisher information (the Hessian of the negative log-likelihood at the MLE);
-propagating that through the map (xi, sigma) -> c_hat = u - sigma/xi gives
+propagating that through the map (xi, sigma) -> c_hat = u + sigma/xi gives
 Var(c_hat) via its gradient, hence a normal-approximation CI. This is the
 probabilistic statement: e.g. "P(true inf >= c_0) >= 0.95" for
 c_0 = c_hat - z_{0.95} * se(c_hat).
@@ -137,7 +138,7 @@ def fit_gpd_tail(
     }
 
     if shape < 0:
-        c_hat = u - scale / shape
+        c_hat = u + scale / shape
 
         hessian = gpd_negloglik_hessian(shape, scale, exceedances)
         try:
@@ -145,8 +146,8 @@ def fit_gpd_tail(
         except np.linalg.LinAlgError:
             cov = np.full((2, 2), np.nan)
 
-        # gradient of c_hat = u - sigma/xi w.r.t. (xi, sigma)
-        grad = np.array([scale / shape**2, -1.0 / shape])
+        # gradient of c_hat = u + sigma/xi w.r.t. (xi, sigma)
+        grad = np.array([-scale / shape**2, 1.0 / shape])
         var_c_hat = float(grad @ cov @ grad)
 
         result["c_hat"] = float(c_hat)

@@ -49,3 +49,15 @@ srun --partition=ampere --nodelist=mauao --cpus-per-task=4 --mem=16G --time=01:0
 
 # ruapehu, CPU-only interactive shell
 srun --partition=hopper --nodelist=ruapehu --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash
+
+
+
+Drop the per-step float() sync
+
+
+HYPERPARAM SEARCH SWEEP --- THIS THIS THIS
+
+
+So concretely: GPT-2 and SimpleStories each have one extra "bonus" sublayer beyond 2 × n_blocks because their embedding tap (input_ids → add / input_ids → embedding) is a distinct sublayer in addition to the 2 × n_blocks block-level sublayers, whereas TinyLlama's input_ids → embedding tap is itself sublayer #1, and every subsequent sublayer pairs up block-by-block with no extra standalone entry — giving TinyLlama exactly 2 × n_blocks with no +1, while GPT-2/SimpleStories get 2 × n_blocks + 1.
+
+That's the actual mechanism: it comes down to whether the config's very first [[sublayers]] entry is counted as one of the 2×n_blocks pairs or as an extra one tacked on before them — a config-authoring detail (how each configs/*.toml was hand-written), not a difference in the underlying model architectures' layer counts.

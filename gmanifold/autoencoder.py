@@ -12,7 +12,6 @@ from tqdm.auto import tqdm
 
 @torch.no_grad()
 def knn(X, k, Q=None, chunk=4096, progress=False):
-    """k nearest neighbours of Q (default X itself, self excluded) in X -> (dist, idx), each (n, k)."""
     self_q = Q is None
     Q = X if self_q else Q
     kk = min(k + int(self_q), len(X))
@@ -30,9 +29,135 @@ def knn(X, k, Q=None, chunk=4096, progress=False):
 
 
 
+
+class BatchedMLP_no_bias(nn.Module):
+    """n_models independent MLPs with the same network_dims, executed as one
+    stack of batched matmuls (torch.baddbmm) instead of vmap over a
+    functional_call -- avoids vmap/stack_module_state's per-op dispatch and
+    the meta-device base-module indirection train_batch uses. Weights are
+    (n_models, in, out); biases are (n_models, 1, out) so they broadcast
+    against a (n_models, B, out) batch. Initialised to match nn.Linear's
+    default (kaiming-uniform fan-in) so a BatchedMLP trains like a stack of
+    freshly constructed nn.Linear layers, not like all-zeros."""
+
+    def __init__(self, n_models: int, network_dims: list[int], activation: type[nn.Module] = nn.SiLU) -> None:
+        super().__init__()
+        self.n_models = n_models
+        self.network_dims = network_dims
+        self.n_layers = len(network_dims) - 1
+        self.activation = activation()
+
+        weights, biases = [], []
+        for i in range(self.n_layers):
+            fan_in, fan_out = network_dims[i], network_dims[i + 1]
+            w = torch.empty(n_models, fan_in, fan_out)
+            # b = torch.empty(n_models, 1, fan_out)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(w, -bound, bound)
+            # nn.init.uniform_(b, -bound, bound)
+            weights.append(w)
+            # biases.append(b)
+        self.weights = nn.ParameterList(nn.Parameter(w) for w in weights)
+        # self.biases = nn.ParameterList(nn.Parameter(b) for b in biases)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """x: (n_models, B, in) -> (n_models, B, out)."""
+        for i in range(self.n_layers):
+            x = torch.bmm(x, self.weights[i])
+            if i != self.n_layers - 1:
+                x = self.activation(x)
+        return x
+
+    @torch.no_grad()
+    def load_from_sequential(self, index: int, seq: nn.Sequential) -> None:
+        """Copies one model's-worth of weights (a plain nn.Sequential built
+        by manifold.block) into row `index` of this batch -- used to seed a
+        BatchedMLP from manifold instances constructed the usual way."""
+        linears = [m for m in seq if isinstance(m, nn.Linear)]
+        assert len(linears) == self.n_layers
+        for i, lin in enumerate(linears):
+            self.weights[i][index] = lin.weight.T
+
+    @torch.no_grad()
+    def state_dict_for(self, index: int) -> dict[str, Tensor]:
+        """The nn.Linear-shaped state_dict for model `index`, e.g. to load
+        back into a plain manifold's encoder/decoder (block()'s Sequential)
+        after training."""
+        sd = {}
+        for i in range(self.n_layers):
+            sd[f"{2 * i}.weight"] = self.weights[i][index].detach().T.contiguous()
+            # sd[f"{2 * i}.bias"] = self.biases[i][index, 0].detach().contiguous()
+        return sd
+
+
+class BatchedMLP(nn.Module):
+    """n_models independent MLPs with the same network_dims, executed as one
+    stack of batched matmuls (torch.baddbmm) instead of vmap over a
+    functional_call -- avoids vmap/stack_module_state's per-op dispatch and
+    the meta-device base-module indirection train_batch uses. Weights are
+    (n_models, in, out); biases are (n_models, 1, out) so they broadcast
+    against a (n_models, B, out) batch. Initialised to match nn.Linear's
+    default (kaiming-uniform fan-in) so a BatchedMLP trains like a stack of
+    freshly constructed nn.Linear layers, not like all-zeros."""
+
+    def __init__(self, n_models: int, network_dims: list[int], activation: type[nn.Module] = nn.SiLU) -> None:
+        super().__init__()
+        self.n_models = n_models
+        self.network_dims = network_dims
+        self.n_layers = len(network_dims) - 1
+        self.activation = activation()
+
+        weights, biases = [], []
+        for i in range(self.n_layers):
+            fan_in, fan_out = network_dims[i], network_dims[i + 1]
+            w = torch.empty(n_models, fan_in, fan_out)
+            b = torch.empty(n_models, 1, fan_out)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(w, -bound, bound)
+            nn.init.uniform_(b, -bound, bound)
+            weights.append(w)
+            biases.append(b)
+        self.weights = nn.ParameterList(nn.Parameter(w) for w in weights)
+        self.biases = nn.ParameterList(nn.Parameter(b) for b in biases)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """x: (n_models, B, in) -> (n_models, B, out)."""
+        for i in range(self.n_layers):
+            x = torch.baddbmm(self.biases[i], x, self.weights[i])
+            if i != self.n_layers - 1:
+                x = self.activation(x)
+        return x
+
+    @torch.no_grad()
+    def load_from_sequential(self, index: int, seq: nn.Sequential) -> None:
+        """Copies one model's-worth of weights (a plain nn.Sequential built
+        by manifold.block) into row `index` of this batch -- used to seed a
+        BatchedMLP from manifold instances constructed the usual way."""
+        linears = [m for m in seq if isinstance(m, nn.Linear)]
+        assert len(linears) == self.n_layers
+        for i, lin in enumerate(linears):
+            self.weights[i][index] = lin.weight.T
+            self.biases[i][index, 0] = lin.bias
+
+    @torch.no_grad()
+    def state_dict_for(self, index: int) -> dict[str, Tensor]:
+        """The nn.Linear-shaped state_dict for model `index`, e.g. to load
+        back into a plain manifold's encoder/decoder (block()'s Sequential)
+        after training."""
+        sd = {}
+        for i in range(self.n_layers):
+            sd[f"{2 * i}.weight"] = self.weights[i][index].detach().T.contiguous()
+            sd[f"{2 * i}.bias"] = self.biases[i][index, 0].detach().contiguous()
+        return sd
+
+
+
+
 class manifold(nn.Module):
     def __init__(
         self,
+        center,
+        scale,
         network_dims: list[int] = [512, 256],
         n_neighbors: int = 32,
         n_scale_neighbors: int = 8,
@@ -41,6 +166,7 @@ class manifold(nn.Module):
         super().__init__()
         self.n_neighbors = n_neighbors
         self.n_scale_neighbors = n_scale_neighbors
+        self.network_dims = network_dims
         self.latent_dim = network_dims[-1]
         self.device = torch.device(
             device or ("cuda" if torch.cuda.is_available() else "cpu"),
@@ -52,8 +178,8 @@ class manifold(nn.Module):
             self.device
         )
 
-        self.register_buffer("center", torch.zeros(0))
-        self.register_buffer("scale", torch.ones(()))
+        self.register_buffer("center", center)
+        self.register_buffer("scale", scale)
 
         self.register_buffer(
             "latent_codes",
@@ -80,10 +206,11 @@ class manifold(nn.Module):
                 layers.append(nn.SiLU())
         return nn.Sequential(*layers)
 
-    def encode(self, x: Tensor) -> Tensor:
+    def encode(self, x: Tensor) -> Tensor:        
         return self.encoder((x.to(self.device) - self.center) / self.scale)
 
     def decode(self, z: Tensor) -> Tensor:
+        
         return self.decoder(z.to(self.device)) * self.scale + self.center
 
     def project(self, x: Tensor) -> Tensor:
@@ -114,37 +241,7 @@ def train(
     log_every: int = 50,
     verbose: bool = False,
 ) -> manifold:
-    train_activations = train_activations.to(model.device)
 
-    # n_states is number of points
-    ambient_dim, n_states = train_activations.shape[1], len(train_activations)
-
-    model.center = train_activations.mean(0)
-    model.scale = ((train_activations - model.center) ** 2).sum(1).mean().sqrt()
-    train_activations_normalised = (train_activations - model.center) / model.scale
-
-    if val_activations is not None:
-        val_activations = val_activations.to(model.device)
-        val_activations_normalised = (val_activations - model.center) / model.scale
-
-    dist, neighbor_idx = knn(train_activations, model.n_neighbors, progress=True)
-
-    model.ambient_spacing = dist[:, model.n_scale_neighbors - 1]
-
-    model.states = train_activations
-
-    counts = torch.bincount(neighbor_idx[:, 0], minlength=n_states).float()
-
-    model.hub_share = float(counts.sort(descending=True).values[:5].sum() / n_states)
-
-    if float(model.ambient_spacing[neighbor_idx[:, 0]].median()) < 0.5 * float(
-        model.ambient_spacing.median()
-    ):
-        model.spacing_unit = "global"
-        print(
-            f"[autoencoder] hub-dominated cloud (top-5 anchors are the nearest neighbour of {model.hub_share:.0%} of the points): "
-            "distances are reported in units of the global median spacing"
-        )
 
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.OneCycleLR(
@@ -247,28 +344,28 @@ def train_batch(
     lam_geom: float = 0.1,
     lam_curv: float = 1e-3,
     curv_delta: float = 0.5,
+    val_activations: Tensor | None = None,
     log_every: int = 50,
     verbose: bool = False,
 ) -> list[manifold]:
-    """Fit len(models) manifolds at once on a GPU, one per row of
-    `train_activations` (N, n_states, D) -- same n_states for every model.
-    All models must share network_dims/n_neighbors/n_scale_neighbors. Each
-    model's parameters are stacked into one batched tensor per layer and
-    trained with a single vmapped forward/backward per step, so N small
-    models share GPU kernels instead of running N sequential train() loops.
-    """
-    print("in train batch")
+
     device = models[0].device
     n_models = len(models)
     train_activations = train_activations.to(device)
+    if val_activations is not None:
+        val_activations = val_activations.to(device)
 
     n_neighbors = models[0].n_neighbors
     n_scale_neighbors = models[0].n_scale_neighbors
     latent_dim = models[0].latent_dim
     ambient_dim, n_states = train_activations.shape[2], train_activations.shape[1]
 
-    center = train_activations.mean(1)  # (N, D)
-    scale = ((train_activations - center[:, None]) ** 2).sum(2).mean(1).sqrt()  # (N,)
+
+    val_activations_normalised = (
+        (val_activations - center[:, None]) / scale[:, None, None]
+        if val_activations is not None
+        else None
+    )
 
     def normalise(idx: Tensor) -> Tensor:
         """Normalised activations for state indices `idx` (N, ...), computed
@@ -380,6 +477,15 @@ def train_batch(
                 losses[k] = losses.get(k, 0.0) + float(v.detach())
 
         rec = {k: v / n_chunks for k, v in losses.items()} | {"epoch": ep_idx}
+
+        if val_activations_normalised is not None:
+            with torch.no_grad():
+                z_val = v_encode(encoder_params, encoder_buffers, val_activations_normalised)
+                x_val_recon = v_decode(decoder_params, decoder_buffers, z_val)
+                rec["val_recon"] = float(
+                    ((x_val_recon - val_activations_normalised) ** 2).sum(2).mean()
+                )
+
         history.append(rec)
         if verbose and (ep_idx % log_every == 0 or ep_idx == epochs - 1):
             print(
@@ -420,6 +526,180 @@ def train_batch(
         latent_dist_i, _ = knn(model.latent_codes, n_neighbors)
         model.latent_scale = latent_dist_i[:, n_scale_neighbors - 1]
         model.history = history  # shared across the batch: losses are averaged over all n_models
+        model.eval()
+
+    return models
+
+
+# -------------------------------------------------------- fused batched fitting
+def train_batch_fused(
+    models: list[manifold],
+    train_activations: Tensor,
+    epochs: int = 300,
+    batch_size: int = 512,
+    lr: float = 2e-3,
+    lam_geom: float = 0.1,
+    lam_curv: float = 1e-3,
+    curv_delta: float = 0.5,
+    val_activations: Tensor | None = None,
+    log_every: int = 50,
+    verbose: bool = False,
+) -> list[manifold]:
+    """Same fitting procedure as train_batch, but the per-model encoder/
+    decoder are a single BatchedMLP each (stacked (n_models, in, out) weight
+    tensors, run with torch.baddbmm) instead of vmap over stack_module_state
+    + functional_call. Same knn setup, same loss terms, same per-epoch
+    history shape -- differs from train_batch only in how the forward/
+    backward pass is expressed, so the two are directly comparable for
+    speed. See BatchedMLP for the weight layout and manifold.block for the
+    plain nn.Sequential this seeds from / writes back to."""
+    device = models[0].device
+    n_models = len(models)
+    train_activations = train_activations.to(device)
+    if val_activations is not None:
+        val_activations = val_activations.to(device)
+
+    n_neighbors = models[0].n_neighbors
+    n_scale_neighbors = models[0].n_scale_neighbors
+    latent_dim = models[0].latent_dim
+    network_dims = models[0].network_dims
+    ambient_dim, n_states = train_activations.shape[2], train_activations.shape[1]
+
+    center = train_activations.mean(1)  # (N, D)
+    scale = ((train_activations - center[:, None]) ** 2).sum(2).mean(1).sqrt()  # (N,)
+
+    val_activations_normalised = (
+        (val_activations - center[:, None]) / scale[:, None, None]
+        if val_activations is not None
+        else None
+    )
+
+    def normalise(idx: Tensor) -> Tensor:
+        pad = (1,) * (idx.dim() - 1)
+        model_arange = torch.arange(n_models, device=device).reshape((n_models,) + pad)
+        x = train_activations[model_arange, idx]
+        return (x - center.reshape((n_models,) + pad + (ambient_dim,))) / scale.reshape(
+            (n_models,) + pad + (1,)
+        )
+
+    ambient_spacing = torch.empty(n_models, n_states, device=device)
+    neighbor_idx = torch.empty(n_models, n_states, n_neighbors, dtype=torch.long, device=device)
+
+    for i in range(n_models):
+        dist_i, idx_i = knn(train_activations[i], n_neighbors)
+        ambient_spacing[i] = dist_i[:, n_scale_neighbors - 1]
+        neighbor_idx[i] = idx_i
+
+    encoder = BatchedMLP(n_models, network_dims).to(device)
+    decoder = BatchedMLP(n_models, list(reversed(network_dims))).to(device)
+    for i, m in enumerate(models):
+        encoder.load_from_sequential(i, m.encoder)
+        decoder.load_from_sequential(i, m.decoder)
+
+    opt = torch.optim.Adam([*encoder.parameters(), *decoder.parameters()], lr=lr)
+    sched = torch.optim.lr_scheduler.OneCycleLR(
+        opt, lr, total_steps=epochs * math.ceil(n_states / batch_size), pct_start=0.05
+    )
+
+    history: list[dict[str, Any]] = []
+    for ep_idx in tqdm(range(epochs), desc="fit_batch_fused"):
+        perm = torch.stack(
+            [torch.randperm(n_states, device=device) for _ in range(n_models)]
+        )
+        losses: dict[str, float] = {}
+        n_chunks = 0
+        for s in range(0, n_states, batch_size):
+            batch_idx = perm[:, s : s + batch_size]  # (N, B)
+            b = batch_idx.shape[1]
+            model_arange = torch.arange(n_models, device=device)[:, None]
+            x = normalise(batch_idx)  # (N, B, D)
+            nb_idx = neighbor_idx[model_arange, batch_idx]  # (N, B, K)
+            neighbors = normalise(nb_idx)  # (N, B, K, D)
+
+            z = encoder(x)  # (N, B, m)
+            z_neighbors = encoder(
+                neighbors.reshape(n_models, b * n_neighbors, ambient_dim)
+            ).reshape(n_models, b, n_neighbors, latent_dim)
+            x_recon = decoder(z)
+
+            ambient_dist, latent_dist = (
+                (neighbors - x[:, :, None]).norm(dim=3),
+                (z_neighbors - z[:, :, None]).norm(dim=3),
+            )
+
+            terms = {
+                "recon": ((x_recon - x) ** 2).sum(2).mean(),
+                "geom": ((latent_dist - ambient_dist) ** 2).mean()
+                / (ambient_dist**2).mean(),
+            }
+            if lam_curv > 0:
+                direction = torch.randn_like(z)
+                direction = (
+                    direction
+                    / direction.norm(dim=2, keepdim=True)
+                    * (curv_delta * latent_dist.detach().mean(2, keepdim=True))
+                )
+                second_diff = (
+                    decoder(z + direction) - 2 * x_recon + decoder(z - direction)
+                )
+                terms["curv"] = ((second_diff**2).sum(2) / (direction**2).sum(2)).mean()
+
+            loss = (
+                terms["recon"]
+                + lam_geom * terms["geom"]
+                + lam_curv * terms.get("curv", 0.0)
+            )
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            sched.step()
+
+            n_chunks += 1
+            for k, v in terms.items():
+                losses[k] = losses.get(k, 0.0) + float(v.detach())
+
+        rec = {k: v / n_chunks for k, v in losses.items()} | {"epoch": ep_idx}
+
+        if val_activations_normalised is not None:
+            with torch.no_grad():
+                z_val = encoder(val_activations_normalised)
+                x_val_recon = decoder(z_val)
+                rec["val_recon"] = float(
+                    ((x_val_recon - val_activations_normalised) ** 2).sum(2).mean()
+                )
+
+        history.append(rec)
+        if verbose and (ep_idx % log_every == 0 or ep_idx == epochs - 1):
+            print(
+                {k: round(v, 4) if isinstance(v, float) else v for k, v in rec.items()},
+            )
+
+    with torch.no_grad():
+        latent_codes = torch.cat(
+            [
+                encoder(
+                    normalise(
+                        torch.arange(s, min(s + batch_size, n_states), device=device)
+                        .unsqueeze(0)
+                        .expand(n_models, -1)
+                    )
+                )
+                for s in range(0, n_states, batch_size)
+            ],
+            dim=1,
+        )  # (N, n_states, m)
+
+    for i, model in enumerate(models):
+        model.encoder.load_state_dict(encoder.state_dict_for(i))
+        model.decoder.load_state_dict(decoder.state_dict_for(i))
+        model.center = center[i]
+        model.scale = scale[i]
+        model.ambient_spacing = ambient_spacing[i]
+        model.states = train_activations[i]
+        model.latent_codes = latent_codes[i]
+        latent_dist_i, _ = knn(model.latent_codes, n_neighbors)
+        model.latent_scale = latent_dist_i[:, n_scale_neighbors - 1]
+        model.history = history
         model.eval()
 
     return models

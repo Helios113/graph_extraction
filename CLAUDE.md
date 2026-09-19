@@ -40,6 +40,58 @@ This means a job that dies 2 hours into a 3-hour run has already pushed every
 completed sublayer's results to Hetzner, and only the in-progress sublayer's
 partial work (still flushed to local disk, just not pushed) needs re-running.
 
+# Chunk the model dim too, not just the point dim, in batched GPU code
+
+`autoencoder/batched_autoencoder.py`'s `batched_autoencoder` and
+`autoencoder/sampling.py`'s `batched_*` functions operate on tensors shaped
+`(n_models, n_points, ...)`. Any GPU op here -- `cdist`, the batched MLP's
+`torch.bmm` (via `encode`/`decode`/`project`), forward-mode-AD jacobians --
+scales with `n_models * n_points` together, not just `n_points`. A function
+chunked only along the point dim (a `chunk` kwarg with no matching
+`model_chunk`) is silently unsafe: it works at small `n_models` (e.g. a
+100-model chunk during training, where GPU memory happens to have headroom)
+and OOMs later at the exact same point-chunk size once more models are
+loaded into one batch at once (e.g. `fit_stats()`/sampling after training,
+which reload every (sublayer, pos) model together rather than training's
+`--n-models-per-chunk`-limited groups).
+
+When adding or calling a batched op here:
+- Give it both a `chunk` (point dim) and a `model_chunk` (model dim) kwarg,
+  and actually loop over both -- see `knn()` in `batched_autoencoder.py` for
+  the reference pattern, or `chunked_apply`/`_recon_geom` in
+  `scripts/autoencoder/validate.py` for encode/decode/project over a full
+  points pool.
+- Never call `model.encode(x)` / `model.decode(z)` / `model.project(x)`
+  directly on a full `(n_models, N, D)` states/val pool -- go through
+  `batched_autoencoder.chunked_apply` (or an equivalent chunked loop)
+  instead, the same way `train_batched_manifold.py`'s `chunked_recon_loss`
+  avoids calling `bmnfld.project(x)` unchunked.
+- Default `model_chunk` to something bounded (e.g. 8), not `None`/all models
+  -- `None` is only safe for call sites that already guarantee a small
+  `n_models` (like the per-chunk training loop), and it's easy to add a new
+  caller (fit_stats, validate, sampling) that doesn't.
+- When you see an OOM crash log from one of these scripts, the traceback
+  frame plus the "Tried to allocate N GiB" size is usually enough to compute
+  which dim was left unchunked (n_models * n_points * d_model * 4 bytes, or
+  n_models * chunk * n_train_rows * 4 bytes for a cdist) -- check that first
+  before assuming it's a batch-size or `--n-models-per-chunk` tuning issue.
+
+# Where output lives: local scratch, not NFS
+
+Any output a mauao job writes repeatedly or writes a lot of -- sweep shards,
+model checkpoints, periodic training checkpoints, anything written more than
+once per job -- goes under node-local scratch (`$NEW_JAC_SCRATCH`, i.e.
+`/local/scratch/$USER/new_jac`), never directly under the NFS-mounted repo
+path (`onnx_models/...` relative to `/nfs-share/pa511/code_bases/new_jac`).
+NFS is a network filesystem; writing to it repeatedly (e.g. a checkpoint
+every 50 epochs) is slower and adds needless network I/O compared to local
+disk. `--out-dir`-style flags on mauao launcher `.sh` scripts should default
+to `${NEW_JAC_SCRATCH}/onnx_models/${NAME}/...`, not `onnx_models/${NAME}/...`.
+Only sweep shard data gets pushed off scratch, and only to the Hetzner remote
+store via `execute/remote_storage.push` (see above) -- not to NFS. Other
+scratch-resident outputs (e.g. autoencoder checkpoints) currently stay on
+scratch only, with no NFS or remote copy, unless a task says otherwise.
+
 
 
 <!-- # Execution & Editing Guidelines -->

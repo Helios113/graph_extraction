@@ -14,6 +14,31 @@ from concurrent.futures import Future, ProcessPoolExecutor
 import upload
 
 
+def _matches_known_size(local_path: str, virtual_path: str) -> bool:
+    """True if `local_path` isn't known to be truncated -- i.e. either there's
+    no local pointer to check against yet, or its recorded size matches the
+    file actually on disk. A size mismatch means a prior pull was interrupted
+    partway through (e.g. the job was killed mid-transfer) and left a
+    truncated file behind; `_pull_file` itself only catches this via a full
+    content hash, but that check is skipped entirely once a caller treats the
+    file's mere existence as good enough (ensure_local's job here). Checking
+    size instead of hash keeps this cheap enough to run on every call, even
+    for multi-GB shards."""
+    ptr_path = upload._ptr_path_for(os.path.join(upload.PROJECT_ROOT, virtual_path))
+    if not os.path.exists(ptr_path):
+        return True
+    with open(ptr_path) as f:
+        ptr = json.load(f)
+    ok = os.path.getsize(local_path) == ptr["size"]
+    if not ok:
+        print(
+            f"[remote_storage] {virtual_path!r} is truncated on disk "
+            f"({os.path.getsize(local_path)} bytes, expected {ptr['size']}) -- "
+            "re-pulling"
+        )
+    return ok
+
+
 def remote_exists(virtual_path: str, config: dict | None = None) -> bool:
     """Cheap check (no download) for whether `virtual_path` has a pointer in
     the remote index -- i.e. whether a prior push actually landed, as opposed
@@ -56,9 +81,13 @@ def ensure_local(path: str, config: dict | None = None, dest_dir: str | None = N
     nfs_path = os.path.join(upload.PROJECT_ROOT, virtual_path)
     local_path = os.path.join(dest_dir, virtual_path) if dest_dir is not None else path
 
-    if os.path.exists(local_path):
+    if os.path.exists(local_path) and _matches_known_size(local_path, virtual_path):
         return local_path
-    if dest_dir is not None and os.path.exists(nfs_path):
+    if (
+        dest_dir is not None
+        and os.path.exists(nfs_path)
+        and _matches_known_size(nfs_path, virtual_path)
+    ):
         return nfs_path
 
     config = config or upload.load_config()

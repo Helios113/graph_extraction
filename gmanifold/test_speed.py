@@ -4,7 +4,7 @@ train_batch(). The full (n_models, n_states, ambient_dim) batch doesn't fit
 on one GPU at this scale, so models are trained in GPU-sized chunks, calling
 train_batch() once per chunk.
 
-Run with: uv run python autoencoder/test_speed.py
+Run with: uv run python -m autoencoder.test_speed
 """
 
 import time

@@ -25,6 +25,7 @@ input = "add"
 output = "add_2"
 loss_type = "MaskedSumLoss"
 input_shape = [32, 4, 768]
+
 [[sublayers]]
 input = "add_2"
 output = "add_5"
