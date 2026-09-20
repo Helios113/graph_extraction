@@ -167,7 +167,7 @@ class batched_autoencoder(nn.Module):
         self.seed: int | None = None
         self.n_train_rows: int | None = None
         self.model_index_offset: int = 0  # global index of this model's row 0 -- see reattach(); nonzero when
-        # this batch is one chunk of a larger chunked training run (scripts.autoencoder.train_batched_manifold's
+        # this batch is one chunk of a larger chunked training run (scripts.python.train_batched_manifold's
         # --n-models-per-chunk), or when load_batched reassembled several chunks' checkpoints into one batch
         self.history: list[dict[str, Any]] = []
         self.spacing_unit = "anchor"  # 'anchor': divide by the nearest anchor's spacing; 'global': by the median
@@ -491,7 +491,7 @@ def save_all(model: batched_autoencoder, out_dir: str, index_offset: int | None 
 
     `index_offset`: defaults to model.model_index_offset (0 unless this batch
     is one chunk of a larger chunked training run -- see
-    scripts.autoencoder.train_batched_manifold's --n-models-per-chunk). Each
+    scripts.python.train_batched_manifold's --n-models-per-chunk). Each
     row's saved `model_index` is index_offset + i: its GLOBAL position, used
     directly as part of that row's own independent split seed
     (seed + model_index) by autoencoder.reattach -- so it must match whatever

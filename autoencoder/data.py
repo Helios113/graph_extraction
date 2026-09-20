@@ -1,7 +1,7 @@
 """Loads point clouds for autoencoder/batched_autoencoder training and
-reattach() from a scripts.generate_perturbed_sweep output directory. Shared
-by scripts/autoencoder/train_batched_manifold.py, sample.py, validate.py, and
-hparam_search.py so all agree on exactly which activations a given
+reattach() from a scripts.python.generate_perturbed_sweep output directory. Shared
+by scripts/python/train_batched_manifold.py, sample_autoencoder.py,
+validate_autoencoder.py, and hparam_search.py so all agree on exactly which activations a given
 (sweep_dir, layers, sample_idx) selects."""
 
 import json
@@ -17,7 +17,7 @@ from execute.sharded_writer import _scratch_root
 
 
 def sweep_dir_for(cfg: ModelConfig) -> str:
-    """The scripts.generate_perturbed_sweep output dir for `cfg`, following
+    """The scripts.python.generate_perturbed_sweep output dir for `cfg`, following
     the same onnx_models/{cfg.name}/perturbed_sweep convention its --out-dir
     default uses. This is the virtual/NFS-relative layer_key namespace;
     load_sample_cloud's pull_dir=_scratch_root() is what makes the actual
@@ -54,7 +54,7 @@ def load_sample_cloud(sweep_dir: str, layer: str, sample_idx: int) -> torch.Tens
     """One sample's (seq, n_vocab, d_model) point cloud for `layer`, reading
     only the rows belonging to `sample_idx` (row order is (sample_idx, pos,
     vocab_idx)-ravelled, so that's one contiguous row range -- see
-    scripts/generate_perturbed_sweep.build_chunk_rows) instead of pulling and
+    scripts/python/generate_perturbed_sweep.build_chunk_rows) instead of pulling and
     reading the whole layer (every sample, e.g. ~40GB/layer for GPT-2) just
     to keep 1/n_samples of it."""
     layer_key = os.path.join(sweep_dir, layer)

@@ -13,8 +13,8 @@ Use uv for every Python command in this project.
 
 Scripts that sweep over all sublayers of a config (e.g. `configs/smoll_jac.toml`)
 and can run for hours must be resilient to a crash/interrupt partway through,
-per the pattern established across `scripts/compute_base_jacobian_stats.py`,
-`scripts/generate_perturbed_sweep.py`, and `scripts/generate_tangent_manifold_distances.py`:
+per the pattern established across `scripts/python/compute_base_jacobian_stats.py`,
+`scripts/python/generate_perturbed_sweep.py`, and `scripts/python/generate_tangent_manifold_distances.py`:
 
 - **One output h5 file per sublayer**, written to an `--out-dir` directory,
   named `{sublayer_input}.{sublayer_output}.h5` -- not one combined file for
@@ -59,7 +59,7 @@ When adding or calling a batched op here:
 - Give it both a `chunk` (point dim) and a `model_chunk` (model dim) kwarg,
   and actually loop over both -- see `knn()` in `batched_autoencoder.py` for
   the reference pattern, or `chunked_apply`/`_recon_geom` in
-  `scripts/autoencoder/validate.py` for encode/decode/project over a full
+  `scripts/python/validate_autoencoder.py` for encode/decode/project over a full
   points pool.
 - Never call `model.encode(x)` / `model.decode(z)` / `model.project(x)`
   directly on a full `(n_models, N, D)` states/val pool -- go through

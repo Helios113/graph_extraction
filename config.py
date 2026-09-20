@@ -78,7 +78,7 @@ class ModelConfig:
         node, per `current_node_name()`) -- `batch_by_node[node]` if set,
         else the plain `batch` default. Different nodes have different GPUs
         (e.g. mauao's A40 vs ruapehu's H100) and so fit different max batch
-        sizes; see scripts/find_max_batch_size.py."""
+        sizes; see scripts/helper/find_max_batch_size.py."""
         node = node or current_node_name()
         return self.batch_by_node.get(node, self.batch)
 

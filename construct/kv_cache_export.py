@@ -8,7 +8,7 @@ static batch dim baked in at export time), the graph produced here takes
 sequence-length axes throughout) and returns `present.{layer}.{key,value}` --
 a prior call's `present` tensors can be fed back in as the next call's `past`,
 so a shared prefix only needs to be run once. See
-scripts/generate_perturbed_sweep_kvcache.py for the sweep that exploits this.
+scripts/helper/generate_perturbed_sweep_kvcache.py for the sweep that exploits this.
 
 optimum-cli is not importable as a clean Python API (it's a CLI-first tool),
 so this shells out to it rather than reimplementing the export by hand --

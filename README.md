@@ -34,14 +34,14 @@ already exist.
 
 
 # preview what would be deleted
-uv run scripts/clean_corrupt_shards.py --dry-run
+uv run scripts/helper/clean_corrupt_shards.py --dry-run
 
 # actually delete everything
-uv run scripts/clean_corrupt_shards.py
+uv run scripts/helper/clean_corrupt_shards.py
 
 # only default scratch root ($NEW_JAC_SCRATCH or /local/scratch/<user>/new_jac) is scanned;
 # override if needed:
-uv run scripts/clean_corrupt_shards.py --scratch-root /local/scratch/pa511/new_jac
+uv run scripts/helper/clean_corrupt_shards.py --scratch-root /local/scratch/pa511/new_jac
 
 
 # mauao, CPU-only interactive shell

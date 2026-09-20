@@ -10,7 +10,7 @@ from execute.io_onnx import run_iobinding_cpu_inputs_gpu_output
 def _gpu_to_mask_dtype_numpy(t: torch.Tensor, mask_dtype: np.dtype) -> np.ndarray:
     """Move a GPU tensor to host as `mask_dtype`. bfloat16 needs the usual
     uint16 bit-reinterpret roundtrip (torch bf16 tensors can't go through
-    .numpy() directly), matching scripts/generate_base_activations.py's
+    .numpy() directly), matching scripts/python/generate_base_activations.py's
     bf16_torch_to_numpy."""
     if mask_dtype == ml_dtypes.bfloat16:
         return t.contiguous().view(torch.uint16).cpu().numpy().view(ml_dtypes.bfloat16)

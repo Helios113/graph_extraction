@@ -11,7 +11,7 @@ weren't yet confirmed uploaded -- on the next run, `ShardedLayerWriter`
 deletes any such unfinished shard from local scratch and recomputes it from
 scratch; every confirmed-complete shard is skipped.
 
-Typical use (see scripts/generate_tangent_manifold_distances.py for the full
+Typical use (see scripts/python/generate_tangent_manifold_distances.py for the full
 integration):
 
     writer = ShardedLayerWriter(
@@ -471,7 +471,7 @@ def discover_layer_names(layers_dir: str) -> list[str]:
 
 def load_base_seqs(seqs_key: str) -> np.ndarray:
     """Reads the full input_ids array from the sharded output written by
-    scripts.generate_base_sequences.tokenize_and_save_sequences (layer_key
+    scripts.python.generate_base_sequences.tokenize_and_save_sequences (layer_key
     == seqs_key, single "input_ids" dataset)."""
     return load_shard_rows(".", seqs_key, dataset_names=["input_ids"])["input_ids"]
 
@@ -480,7 +480,7 @@ def load_activations(activations_dir: str) -> tuple[np.ndarray, dict[str, np.nda
     """Reads base_seqs.h5 plus every layer's sharded "activation" dataset
     (bf16 stored as raw uint16, viewed back here) under
     activations_dir/activations/ -- the format written by
-    scripts.generate_base_activations.collect_and_save_activations. Shared by
+    scripts.python.generate_base_activations.collect_and_save_activations. Shared by
     every script that consumes base activations (compute_base_jacobian_stats,
     generate_tangent_manifold_distances)."""
     import ml_dtypes

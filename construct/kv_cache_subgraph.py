@@ -1,6 +1,6 @@
 """Extracts a sublayer-activation-plus-KV-cache subgraph from a KV-cache
 model.onnx (see construct/kv_cache_export.py), for use by
-scripts/generate_perturbed_sweep_kvcache.py.
+scripts/helper/generate_perturbed_sweep_kvcache.py.
 
 Sublayer tensors in the KV-cache export are named positionally and
 predictably by decoder layer index -- verified against the old cacheless
