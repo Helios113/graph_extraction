@@ -36,6 +36,7 @@ def tokenize_and_save_sequences(
     no_push: bool,
     overwrite_remote: bool = False,
 ) -> None:
+    # Get writer orbject
     writer = ShardedLayerWriter(
         layer_key=out_key,
         n_rows=n,

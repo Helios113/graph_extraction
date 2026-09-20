@@ -203,16 +203,14 @@ def _run_perturbed_sweep_once(
     ensure_base_model(cfg, force=stale_batch, verbose=False)
     extra_outputs = [sublayer.output for sublayer in cfg.sublayers]
 
-    # Same staleness check as the base model, but applied to the extra-outputs
-    # model itself: it's extracted from base_model_path, so a stale copy left
-    # over from a previous batch size (e.g. before an OOM-triggered shrink)
-    # must be regenerated even when the base model above turned out to
-    # already be current (stale_batch == False), otherwise ORT loads a model
-    # whose static input batch dim doesn't match `batch`.
+    # check if we need to re-export
     extra_outputs_path = cfg.dir / "base_model_extra_outputs.onnx"
     stale_extra_outputs = stale_batch or exported_batch_size(extra_outputs_path) != batch
+    
+    # removes lm_head from models to save compute
     model_path = ensure_extra_outputs(cfg, extra_outputs, force=stale_extra_outputs)
 
+    # generate session
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
     sess_options.intra_op_num_threads = 8
@@ -222,17 +220,11 @@ def _run_perturbed_sweep_once(
         sess_options=sess_options,
         providers=["CUDAExecutionProvider"],
     )
-    # No leading "output" (final logits) slot -- ensure_extra_outputs
-    # extracts a subgraph whose outputs are exactly extra_outputs, dropping
-    # the logits/lm_head computation entirely since nothing here reads it.
+    
     out_output_names = [o.name for o in out_sess.get_outputs()]
     out_input_names = [o.name for o in out_sess.get_inputs()]
-    print(out_output_names, out_input_names)
 
-    # Reused across every chunk instead of allocating a new IOBinding per
-    # call (run_iobinding_cpu_input_gpu_output clears its prior bindings
-    # before rebinding, so this is safe across chunks with differing shapes,
-    # e.g. the final padded chunk).
+    # create io session
     io_binding = out_sess.io_binding()
 
     # original (unperturbed) sequences, indexed by sample_idx -- each row's
@@ -249,11 +241,6 @@ def _run_perturbed_sweep_once(
             f.attrs["d_model"] = cfg.d_model
             f.create_dataset("base_seqs", data=base_seqs)
 
-    # Shared across every layer's writer below so their shard uploads run
-    # concurrently (bounded by upload_workers) instead of one at a time --
-    # each writer still caps itself at one of its own shards in flight, so
-    # the GPU loop is never more than one shard ahead of what's been pushed
-    # for a given layer.
     pusher = None if no_push else AsyncPusher(max_workers=upload_workers)
 
     writers = {
