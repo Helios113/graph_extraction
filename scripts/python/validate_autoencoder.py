@@ -93,8 +93,10 @@ def main():
 
     assert (args.model is None) != (args.batched_dir is None), "pass exactly one of --model / --batched-dir"
 
-    sweep_dir = sweep_dir_for(load_config(args.config))
-    layers = args.layers or discover_layer_names(sweep_dir)
+    cfg = load_config(args.config)
+    sweep_dir = sweep_dir_for(cfg)
+    full_layers = discover_layer_names(sweep_dir)
+    layers = args.layers or full_layers
     full_activations = load_sweep_data(sweep_dir, layers, args.sample_idx)
 
     if args.model:
@@ -129,7 +131,16 @@ def main():
         print(f"  nearest_real train={train_nr.item():.4f}  val={val_nr.item():.4f}  (spacing units)")
 
     else:
-        model = load_batched(args.batched_dir, device=device)
+        # `layers` here is what full_activations was built from -- reattach()'s row
+        # alignment only holds if the checkpoint dir has exactly this set of global
+        # indices (layer_idx * seq + pos over `layers`), no more, no fewer; e.g. a
+        # directory only some of a multi-batch train_batched_manifold.py run's
+        # batches have landed in would otherwise silently reattach a partial/
+        # misaligned model instead of failing loudly -- see load_batched's docstring.
+        expected_indices = {
+            full_layers.index(layer) * cfg.seq + pos for layer in layers for pos in range(cfg.seq)
+        }
+        model = load_batched(args.batched_dir, device=device, expected_indices=expected_indices)
         pool = full_activations.to(device)
         model.reattach(pool)
         model.fit_stats(knn_chunk=args.chunk, knn_model_chunk=args.model_chunk)

@@ -163,7 +163,7 @@ def run_sublayer(
 
     map_fn = make_subgraph_map(cfg, src, dst)
 
-    layer_key = os.path.join(out_dir, f"{src}.{dst}")
+    layer_key = os.path.join(out_dir, f"{src}.{dst}.sample{sample_idx}")
     writer = ShardedLayerWriter(
         layer_key=layer_key,
         n_rows=seq * n,

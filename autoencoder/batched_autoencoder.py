@@ -169,6 +169,11 @@ class batched_autoencoder(nn.Module):
         self.model_index_offset: int = 0  # global index of this model's row 0 -- see reattach(); nonzero when
         # this batch is one chunk of a larger chunked training run (scripts.python.train_batched_manifold's
         # --n-models-per-chunk), or when load_batched reassembled several chunks' checkpoints into one batch
+        self.model_indices: Tensor | None = None  # per-row (n_models,) index, overriding model_index_offset+row
+        # in reattach() when set -- used when rows come from more than one sample (each sample has its own
+        # local 0..n-1 numbering, so a single shared offset can't describe every row's index; see
+        # load_batched_multi and scripts.python.train_batched_manifold's multi-sample chunking). None (the
+        # default) preserves the plain model_index_offset+row formula for every single-sample call site.
         self.history: list[dict[str, Any]] = []
         self.spacing_unit = "anchor"  # 'anchor': divide by the nearest anchor's spacing; 'global': by the median
         self.hub_share = 0.0  # share of points whose nearest neighbour is one of the 5 most common anchors
@@ -196,23 +201,32 @@ class batched_autoencoder(nn.Module):
 
     def reattach(self, full_activations: Tensor) -> None:
         """Re-derives self.states -- a per-row seeded torch.randperm(row_seed)
-        [:n_train_rows] subset, row_seed = self.seed + model_index_offset + row
-        -- from a freshly supplied (n_models, N, D) pool of the same activations
-        used at fit time. Each row's split is entirely self-contained (its own
-        Generator, not a shared stream burned through in row order), so this is
-        correct regardless of how training was chunked: reattaching a batch
-        reassembled (e.g. via load_batched) from several separately-trained
-        chunks still reproduces each row's own original split. Requires
-        seed/n_train_rows to already be set (set directly after training, or
-        via `load`/`load_batched`)."""
+        [:n_train_rows] subset, row_seed = self.seed + row_index, where
+        row_index is self.model_indices[row] if set, else the plain
+        model_index_offset + row -- from a freshly supplied (n_models, N, D)
+        pool of the same activations used at fit time. Each row's split is
+        entirely self-contained (its own Generator, not a shared stream
+        burned through in row order), so this is correct regardless of how
+        training was chunked: reattaching a batch reassembled (e.g. via
+        load_batched) from several separately-trained chunks still
+        reproduces each row's own original split. model_indices (rather than
+        a single offset) is what makes this correct even when rows were
+        drawn from more than one sample, each with its own local 0..n-1
+        numbering (see load_batched_multi). Requires seed/n_train_rows to
+        already be set (set directly after training, or via
+        `load`/`load_batched`/`load_batched_multi`)."""
         assert self.seed is not None and self.n_train_rows is not None
         full_activations = full_activations.to(self.device)
         n_models = full_activations.shape[0]
+        row_indices = (
+            self.model_indices if self.model_indices is not None
+            else self.model_index_offset + torch.arange(n_models)
+        )
         perms = torch.stack([
             torch.randperm(
                 full_activations.shape[1],
                 generator=torch.Generator(device=full_activations.device).manual_seed(
-                    self.seed + self.model_index_offset + row,
+                    self.seed + int(row_indices[row]),
                 ),
                 device=full_activations.device,
             )
@@ -481,31 +495,64 @@ class autoencoder(nn.Module):
         )
 
 
-def save_all(model: batched_autoencoder, out_dir: str, index_offset: int | None = None) -> None:
+def save_all(
+    model: batched_autoencoder,
+    out_dir: str | list[str],
+    index_offset: int | list[int] | None = None,
+    sample_idx: int | list[int] | None = None,
+) -> None:
     """Splits a trained batched_autoencoder into model.encoder.n_models
-    individual checkpoints, written to out_dir/model_{global_index}.pt --
-    each loadable via `load` into a plain autoencoder. Does not save
-    model.states itself -- only seed/global_index, so the caller must
-    `reattach` a freshly-supplied copy of that model's full activation pool
-    after loading to get `states` back (see autoencoder.reattach).
+    individual checkpoints, written to out_dir/model_{index}.pt -- each
+    loadable via `load` into a plain autoencoder. Does not save model.states
+    itself -- only seed/model_index, so the caller must `reattach` a
+    freshly-supplied copy of that model's full activation pool after loading
+    to get `states` back (see autoencoder.reattach).
 
-    `index_offset`: defaults to model.model_index_offset (0 unless this batch
-    is one chunk of a larger chunked training run -- see
+    `out_dir`/`index_offset`/`sample_idx` may each be a single value
+    (broadcast to every row, the common case -- one sample's full sweep
+    written to one directory) or a list of length model.encoder.n_models
+    (one value per row), for splitting a single batched_autoencoder whose
+    rows came from more than one sample (see
+    scripts.python.train_batched_manifold's multi-sample chunking) back out
+    to each row's own per-sample directory and local numbering.
+
+    `index_offset`: per row, defaults to model.model_index_offset + i (0
+    unless this batch is one chunk of a larger chunked training run -- see
     scripts.python.train_batched_manifold's --n-models-per-chunk). Each
-    row's saved `model_index` is index_offset + i: its GLOBAL position, used
-    directly as part of that row's own independent split seed
-    (seed + model_index) by autoencoder.reattach -- so it must match whatever
-    global slot this checkpoint actually occupies, which is also why it's the
-    same number as the output filename."""
+    row's saved `model_index` is used directly as part of that row's own
+    independent split seed (seed + model_index) by autoencoder.reattach --
+    so it must match whatever slot this checkpoint occupies *within its own
+    out_dir*, which is also why it's the same number as the output filename.
+
+    `sample_idx`: which --sample-idx's activation pool this model was trained
+    on (see scripts.python.train_batched_manifold), stamped into each
+    checkpoint -- load_batched asserts every checkpoint sharing one out_dir
+    has the same sample_idx. None if the caller doesn't track one (older
+    call sites)."""
     import os
 
     assert model.seed is not None and model.n_train_rows is not None, (
         "model.seed/n_train_rows must be set (e.g. right after training) before save_all"
     )
-    index_offset = model.model_index_offset if index_offset is None else index_offset
-    os.makedirs(out_dir, exist_ok=True)
-    for i in range(model.encoder.n_models):
-        global_index = index_offset + i
+    n = model.encoder.n_models
+
+    def _broadcast(value, default):
+        if isinstance(value, list):
+            assert len(value) == n, f"expected {n} values, got {len(value)}"
+            return value
+        return [default if value is None else value] * n
+
+    out_dirs = _broadcast(out_dir, None)
+    index_offsets = _broadcast(index_offset, model.model_index_offset)
+    if isinstance(index_offset, list):
+        global_indices = index_offsets
+    else:
+        global_indices = [index_offsets[i] + i for i in range(n)]
+    sample_indices = _broadcast(sample_idx, None)
+
+    for d in set(out_dirs):
+        os.makedirs(d, exist_ok=True)
+    for i in range(n):
         torch.save(
             dict(
                 network_dims=model.network_dims,
@@ -517,9 +564,10 @@ def save_all(model: batched_autoencoder, out_dir: str, index_offset: int | None 
                 scale=model.scale[i].detach().cpu(),
                 seed=model.seed,
                 n_train_rows=model.n_train_rows,
-                model_index=global_index,
+                model_index=global_indices[i],
+                sample_idx=sample_indices[i],
             ),
-            os.path.join(out_dir, f"model_{global_index}.pt"),
+            os.path.join(out_dirs[i], f"model_{global_indices[i]}.pt"),
         )
 
 
@@ -536,17 +584,35 @@ def load(path: str, device: torch.device | str | None = None) -> autoencoder:
     model.seed = ckpt["seed"]
     model.n_train_rows = ckpt["n_train_rows"]
     model.model_index = ckpt["model_index"]
+    model.sample_idx = ckpt.get("sample_idx")
     return model.eval()
 
 
-def load_batched(out_dir: str, device: torch.device | str | None = None) -> batched_autoencoder:
+def load_batched(
+    out_dir: str, device: torch.device | str | None = None, expected_indices: set[int] | None = None,
+) -> batched_autoencoder:
     """Inverse of save_all: reassembles a batched_autoencoder from every
     model_{i}.pt checkpoint in `out_dir`. All checkpoints must share
     network_dims/n_neighbors/n_scale_neighbors/seed/n_train_rows (true of
-    any dir written by one save_all call) and cover model indices 0..n-1
-    contiguously. Does not restore states -- call reattach() on the result
-    with a freshly-supplied (n_models, N, D) pool, as with a single
-    autoencoder's load()."""
+    any dir written by one save_all call). The checkpoint indices present
+    need NOT be a contiguous 0..n-1 set -- e.g. a directory that's only
+    received some of several --layers-restricted train_batched_manifold.py
+    runs (see its per-run global-index scheme, layer_idx * seq + pos) will
+    have gaps until every run has landed. Whatever indices ARE present are
+    loaded, in sorted order, as `n_models` = len(indices) rows (not max
+    index + 1), with `model.model_indices` set to the sorted index list --
+    the same mechanism load_batched_multi already uses to record "row i's
+    global index isn't simply i" (see its docstring). Does not restore
+    states -- call reattach() on the result with a freshly-supplied
+    (n_models, N, D) pool, as with a single autoencoder's load().
+
+    `expected_indices`: if given, asserts the loaded index set equals
+    exactly this set -- use this at any call site where silently proceeding
+    on a partial/incomplete directory (e.g. mid-way through a multi-batch
+    training run) would corrupt downstream results rather than just fail
+    loudly. Without it, load_batched has no way to tell "this directory is
+    deliberately sparse and complete" from "a batch is still missing" --
+    it's on the caller to know which applies."""
     import glob
     import os
     import re
@@ -557,21 +623,30 @@ def load_batched(out_dir: str, device: torch.device | str | None = None) -> batc
         m = re.match(r"model_(\d+)\.pt$", os.path.basename(p))
         if m:
             by_index[int(m.group(1))] = p
-    n_models = len(by_index)
-    assert n_models > 0, f"no model_{{i}}.pt checkpoints found in {out_dir}"
-    assert set(by_index) == set(range(n_models)), (
-        f"expected contiguous model indices 0..{n_models - 1} in {out_dir}, got {sorted(by_index)}"
-    )
+    assert len(by_index) > 0, f"no model_{{i}}.pt checkpoints found in {out_dir}"
+    if expected_indices is not None:
+        assert set(by_index) == expected_indices, (
+            f"{out_dir}: expected checkpoint indices {sorted(expected_indices)}, "
+            f"got {sorted(by_index)} -- missing {sorted(expected_indices - set(by_index))}, "
+            f"unexpected {sorted(set(by_index) - expected_indices)}"
+        )
 
-    ckpts = [torch.load(by_index[i], map_location="cpu") for i in range(n_models)]
+    sorted_indices = sorted(by_index)
+    n_models = len(sorted_indices)
+
+    ckpts = [torch.load(by_index[idx], map_location="cpu") for idx in sorted_indices]
     first = ckpts[0]
-    for i, ckpt in enumerate(ckpts):
+    for row, (idx, ckpt) in enumerate(zip(sorted_indices, ckpts)):
         assert ckpt["network_dims"] == first["network_dims"]
         assert ckpt["seed"] == first["seed"]
         assert ckpt["n_train_rows"] == first["n_train_rows"]
-        assert ckpt.get("model_index", i) == i, (
-            f"model_{i}.pt has model_index={ckpt.get('model_index')}, expected {i} -- "
-            "its own global split seed (seed + model_index) wouldn't match this row's position"
+        assert ckpt.get("model_index", idx) == idx, (
+            f"model_{idx}.pt has model_index={ckpt.get('model_index')}, expected {idx} -- "
+            "its own global split seed (seed + model_index) wouldn't match its filename"
+        )
+        assert ckpt.get("sample_idx") == first.get("sample_idx"), (
+            f"model_{idx}.pt has sample_idx={ckpt.get('sample_idx')}, expected {first.get('sample_idx')} -- "
+            f"{out_dir} mixes checkpoints trained on different samples"
         )
 
     center = torch.stack([c["center"] for c in ckpts])
@@ -582,11 +657,68 @@ def load_batched(out_dir: str, device: torch.device | str | None = None) -> batc
         n_neighbors=first.get("n_neighbors", 32), n_scale_neighbors=first.get("n_scale_neighbors", 8),
         device=device,
     )
-    for i, ckpt in enumerate(ckpts):
-        model.encoder.load_state_dict_for(i, ckpt["encoder_state_dict"])
-        model.decoder.load_state_dict_for(i, ckpt["decoder_state_dict"])
+    for row, ckpt in enumerate(ckpts):
+        model.encoder.load_state_dict_for(row, ckpt["encoder_state_dict"])
+        model.decoder.load_state_dict_for(row, ckpt["decoder_state_dict"])
     model.to(model.device)
     model.seed = first["seed"]
-    model.model_index_offset = 0  # row i's global index is i, by the model_index assertion above
+    model.model_indices = torch.tensor(sorted_indices)  # row i's global index is sorted_indices[i], possibly sparse
     model.n_train_rows = first["n_train_rows"]
+    model.sample_idx = first.get("sample_idx")
     return model.eval()
+
+
+def load_batched_multi(
+    sample_out_dirs: list[str], device: torch.device | str | None = None,
+) -> batched_autoencoder:
+    """Merges several samples' independently-saved checkpoint directories
+    (each a valid load_batched(out_dir) on its own -- one sample = one
+    directory, per save_all/load_batched's per-directory contiguous-0..n-1
+    and single-sample_idx invariants, both left untouched here) into one
+    combined batched_autoencoder, so reattach()/fit_stats()/sampling can run
+    once across every row instead of once per sample.
+
+    Concatenates center/scale/encoder+decoder weights across every source
+    model's rows (in sample_out_dirs order) and sets the merged model's
+    model_indices to the concatenation of each source model's own row
+    index (0..n_i-1, i.e. its local index within its own sample) rather
+    than a single model_index_offset -- this is what lets reattach() derive
+    each row's original train/val split correctly even though rows from
+    different samples are now interleaved in one object (see
+    batched_autoencoder.reattach's docstring). Requires every source model
+    to share network_dims/n_neighbors/n_scale_neighbors/seed/n_train_rows
+    (same requirement load_batched already enforces within one directory,
+    extended here across directories -- a mismatch means the samples were
+    trained with incompatible settings and shouldn't be merged)."""
+    sources = [load_batched(d, device=device) for d in sample_out_dirs]
+    first = sources[0]
+    for d, m in zip(sample_out_dirs, sources):
+        assert m.network_dims == first.network_dims, f"{d}: network_dims mismatch"
+        assert m.n_neighbors == first.n_neighbors, f"{d}: n_neighbors mismatch"
+        assert m.n_scale_neighbors == first.n_scale_neighbors, f"{d}: n_scale_neighbors mismatch"
+        assert m.seed == first.seed, f"{d}: seed mismatch ({m.seed} != {first.seed})"
+        assert m.n_train_rows == first.n_train_rows, f"{d}: n_train_rows mismatch"
+
+    center = torch.cat([m.center for m in sources], dim=0)
+    scale = torch.cat([m.scale for m in sources], dim=0)
+    n_models = center.shape[0]
+
+    merged = batched_autoencoder(
+        center, scale, n_models, network_dims=first.network_dims,
+        n_neighbors=first.n_neighbors, n_scale_neighbors=first.n_scale_neighbors,
+        device=device,
+    )
+    row = 0
+    model_indices = []
+    for m in sources:
+        for i in range(m.encoder.n_models):
+            merged.encoder.load_state_dict_for(row, m.encoder.state_dict_for(i))
+            merged.decoder.load_state_dict_for(row, m.decoder.state_dict_for(i))
+            model_indices.append(i)
+            row += 1
+    merged.to(merged.device)
+    merged.seed = first.seed
+    merged.n_train_rows = first.n_train_rows
+    merged.model_indices = torch.tensor(model_indices)
+    merged.sample_idx = [m.sample_idx for m in sources]  # one per source dir, not a single scalar
+    return merged.eval()

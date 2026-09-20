@@ -1,9 +1,12 @@
 #!/bin/bash
 # Moves every onnx_models/{name}/ae_checkpoints dir currently on NFS to its
-# correct scratch location ($NEW_JAC_SCRATCH/onnx_models/{name}/ae_checkpoints),
-# per CLAUDE.md's "local scratch, not NFS" convention -- one-off fixup for
+# correct scratch location
+# ($NEW_JAC_SCRATCH/onnx_models/{name}/ae_checkpoints/sample0), per
+# CLAUDE.md's "local scratch, not NFS" convention -- one-off fixup for
 # checkpoints saved before scripts/batch_scripts/train_batched_manifold_mauao.sh
-# was updated to write directly to scratch.
+# was updated to write directly to scratch. These pre-existing dirs predate
+# the --sample-idx-suffixed layout too, so they're assumed to be sample 0
+# (the default every run used before --sample-idx was threaded through).
 #
 # Run via srun on mauao (scratch is node-local, not reachable from the NFS
 # login node):
@@ -19,7 +22,7 @@ export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
 for src_dir in onnx_models/*/ae_checkpoints; do
     [ -d "${src_dir}" ] || continue
     name="$(basename "$(dirname "${src_dir}")")"
-    dest_dir="${NEW_JAC_SCRATCH}/onnx_models/${name}/ae_checkpoints"
+    dest_dir="${NEW_JAC_SCRATCH}/onnx_models/${name}/ae_checkpoints/sample0"
 
     if [ -d "${dest_dir}" ]; then
         echo "skipping ${name}: ${dest_dir} already exists"

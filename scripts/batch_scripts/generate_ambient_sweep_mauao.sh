@@ -24,4 +24,5 @@ echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NE
 exec uv run python -m scripts.python.generate_ambient_sweep \
     "${CONFIG}" \
     --out-dir "onnx_models/${NAME}/ambient_sweep" \
-    --n 1000
+    --n 1000 \
+    --no-push

@@ -52,8 +52,10 @@ def main():
 
     assert (args.model is None) != (args.batched_dir is None), "pass exactly one of --model / --batched-dir"
 
-    sweep_dir = sweep_dir_for(load_config(args.config))
-    layers = args.layers or discover_layer_names(sweep_dir)
+    cfg = load_config(args.config)
+    sweep_dir = sweep_dir_for(cfg)
+    full_layers = discover_layer_names(sweep_dir)
+    layers = args.layers or full_layers
     full_activations = load_sweep_data(sweep_dir, layers, args.sample_idx)
 
     if args.model:
@@ -65,7 +67,14 @@ def main():
         )
         print(f"sampled {x.shape} points, ess={info['ess']:.0f}/{info['n_candidates']}, tau={info['tau']:.2f}")
     else:
-        model = load_batched(args.batched_dir, device=device)
+        # See validate_autoencoder.py's equivalent check -- reattach()'s row
+        # alignment against full_activations (built from `layers`) requires the
+        # checkpoint dir to hold exactly this global index set, not a subset from
+        # an in-progress multi-batch training run.
+        expected_indices = {
+            full_layers.index(layer) * cfg.seq + pos for layer in layers for pos in range(cfg.seq)
+        }
+        model = load_batched(args.batched_dir, device=device, expected_indices=expected_indices)
         model.reattach(full_activations.to(device))
         model.fit_stats(knn_chunk=args.knn_chunk, knn_model_chunk=args.knn_model_chunk)
         x, info = sampling.batched_sample(

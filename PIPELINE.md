@@ -20,7 +20,7 @@ generate tanged manifold distances
 
 
 
-## Plan
+## Plan Code
 
 ### Must haves:
 
@@ -33,12 +33,18 @@ generate tanged manifold distances
 
 1. Get all of data that we need
 
-   - [ ] Valid points
+   - [x] Valid points
 
    - [ ] Autoencoder points
      - Run samples sweep on all three models, ideally all samples
+        ```
+        run_autoencoder_sampled_sweep.py now supports both requests: --alpha is nargs="+" (was a single float) — e.g. --alpha 0.3 1.5 sweeps both, each written to its own {src}.{dst}.alpha{a}.h5. --noise is a new nargs="*" flag — e.g. --noise 0.5 1.0 writes calibration variants ({src}.{dst}.noise{level}.h5): real fitted states displaced by Gaussian noise scaled by each anchor's own local ambient spacing, matching the "real + 0.5x/1x noise" bands from plot_autoencoder_sample_diagnostics.py. Omitting --noise writes nothing extra (unchanged default behavior).
+        ```
 
-   - [ ] Autoencoder verification like what Jakub showed
+
+
+   - [x] Autoencoder verification like what Jakub showed: WIP
+      - sbatch scripts/batch_scripts/plot_autoencoder_sample_diagnostics_mauao.sh configs/s.toml <src>.<dst> <pos> [ae_checkpoints_dir]
 
    - [ ] Tangent points
      - Run samples sweep on all three models, ideally all samples
@@ -54,3 +60,8 @@ generate tanged manifold distances
 
 ### Could haves:
     KV caching to get longer sequences
+
+
+
+
+## Plan Paper

@@ -105,11 +105,29 @@ def ensure_extra_outputs(
     output_path = cfg.dir / "base_model_extra_outputs.onnx"
     lock_path = output_path.with_suffix(output_path.suffix + ".lock")
     with exclusive_lock(lock_path):
-        if not force and output_path.exists():
+        # output_path is a single file per cfg, shared across every caller
+        # (generate_perturbed_sweep.py, run_autoencoder_sampled_sweep.py,
+        # generate_ambient_sweep.py, ...) regardless of what `extra_outputs`
+        # each one asks for -- an earlier call that built it for a different,
+        # narrower set of outputs would otherwise be silently reused here and
+        # fail downstream with ORT's opaque "Invalid output name", so treat
+        # a cached file missing any requested output the same as `force`.
+        if output_path.exists():
+            cached_model = onnx.load(str(output_path), load_external_data=False)
+            cached_outputs = {o.name for o in cached_model.graph.output}
+        else:
+            cached_outputs = set()
+        stale = not set(extra_outputs) <= cached_outputs
+        if not force and output_path.exists() and not stale:
             print(
                 f"Extra outputs model already exists, skipping generation -> {output_path}",
             )
         else:
+            if output_path.exists() and stale and not force:
+                print(
+                    f"Extra outputs model at {output_path} is missing requested output(s) "
+                    f"{sorted(set(extra_outputs) - cached_outputs)} (built for {sorted(cached_outputs)}); regenerating",
+                )
             input_path = cfg.base_model_path
 
             # Every requested tensor must be a known value_info/output/input

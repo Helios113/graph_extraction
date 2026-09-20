@@ -16,12 +16,15 @@ cd /nfs-share/pa511/code_bases/new_jac
 
 CONFIG="${1:-configs/gpt2.toml}"
 NAME="$(basename "${CONFIG}" .toml)"
+SAMPLE_IDX="${2:-0}"
 
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
-OUT_DIR="${NEW_JAC_SCRATCH}/onnx_models/${NAME}/ae_checkpoints"
+# Must match autoencoder.data.ae_checkpoints_dir_for(cfg, sample_idx)
+OUT_DIR="${NEW_JAC_SCRATCH}/onnx_models/${NAME}/ae_checkpoints/sample${SAMPLE_IDX}"
 
-echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NEW_JAC_SCRATCH}, out-dir ${OUT_DIR}"
+echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, sample-idx ${SAMPLE_IDX}, scratch ${NEW_JAC_SCRATCH}, out-dir ${OUT_DIR}"
 
 exec uv run python -m scripts.python.train_batched_manifold \
     "${CONFIG}" \
+    --sample-idx "${SAMPLE_IDX}" \
     --out-dir "${OUT_DIR}"

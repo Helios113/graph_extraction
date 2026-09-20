@@ -5,31 +5,38 @@ real ONNX sublayer, saving (sampled input, real output) pairs -- the
 tangent-space analogue of scripts.python.generate_ambient_sweep, which instead adds
 isotropic noise directly in ambient space with no local structure.
 
-Mechanism (per sublayer, per position `pos`):
+--sample-idx takes one or more samples; --samples-per-chunk groups them
+purely for progress-reporting/organization (default 1). Each sample's
+tangent-space sampling is fully independent -- its own tangent bases (see
+scripts.python.generate_tangent_bases), own context activations
+(base_seqs[sample_idx]) -- so grouping never changes what gets computed.
+
+Mechanism (per sample, per sublayer, per position `pos`):
   1. Anchor: draw n indices uniformly (with replacement) from src's
      (basis, center) rows at position `pos`, as saved by
-     scripts.python.generate_tangent_bases to local scratch.
+     scripts.python.generate_tangent_bases to local scratch for that sample.
   2. Sample: draw a point uniformly in the d_model-dimensional ball of
      radius --radius in that anchor's tangent basis, then map it back to
      ambient space and add it to the anchor's center (same
      sample_ball_in_tangent_basis_batch_gpu used by
      scripts.python.generate_tangent_manifold_distances).
-  3. Context: base_seqs[--sample-idx] (the same fixed sequence used
-     elsewhere in this sweep family) is run once through
-     ensure_extra_outputs to get REAL src-activations at every position.
-     Cached per sublayer since it doesn't depend on the sample.
+  3. Context: base_seqs[sample_idx] (that sample's fixed sequence, used
+     elsewhere in this sweep family too) is run once per (sample, sublayer)
+     through ensure_extra_outputs to get REAL src-activations at every
+     position.
   4. Splice: each sampled point replaces position `pos`'s value in that
      real src tensor -- every other position keeps its real activation.
   5. Run the full (1, seq, d_model) spliced tensor through the {src}.{dst}
      subgraph (ensure_subgraphs) and read dst at position `pos`.
 
-Output: one h5 file per sublayer (see execute.sharded_writer.ShardedLayerWriter
-and CLAUDE.md's per-sublayer resilience pattern), pushed as soon as that
-sublayer finishes. Each row holds the sampled src vector, the real dst
-vector, the position, and the anchor index (which real point's tangent ball
-the sample was drawn from); multiplicity is always 1 (no ball-membership
-concept applies here) and is kept only for schema parity with
-run_sampled_sweep's/generate_ambient_sweep's h5 files.
+Output: one h5 file per (sample, sublayer) -- {src}.{dst}.sample{idx}.h5
+(see execute.sharded_writer.ShardedLayerWriter and CLAUDE.md's per-sublayer
+resilience pattern), pushed as soon as that (sample, sublayer) finishes.
+Each row holds the sampled src vector, the real dst vector, the position,
+and the anchor index (which real point's tangent ball the sample was drawn
+from); multiplicity is always 1 (no ball-membership concept applies here)
+and is kept only for schema parity with run_sampled_sweep's/
+generate_ambient_sweep's h5 files.
 """
 
 import argparse
@@ -73,13 +80,14 @@ def load_base_seq(sweep_dir: str, sample_idx: int) -> np.ndarray:
         return f["base_seqs"][sample_idx]  # (seq,) token ids
 
 
-def load_tangent_bases(tangent_bases_dir: str, layer: str) -> dict[str, np.ndarray]:
+def load_tangent_bases(tangent_bases_dir: str, layer: str, sample_idx: int) -> dict[str, np.ndarray]:
     """Reads scripts.python.generate_tangent_bases' saved (basis, center, pos,
     vocab_id) rows for one layer. Written with no_push=True, so
     load_shard_rows resolves every shard straight off local scratch (no
     remote pull) -- this must run on the same node the bases were computed
-    on."""
-    layer_key = os.path.join(tangent_bases_dir, layer)
+    on. `sample_idx` must match the --sample-idx generate_tangent_bases was
+    run with (it's baked into the saved layer_key)."""
+    layer_key = os.path.join(tangent_bases_dir, f"{layer}.sample{sample_idx}")
     return load_shard_rows(".", layer_key, dataset_names=["basis", "center", "pos", "vocab_id"])
 
 
@@ -174,14 +182,14 @@ def run_sublayer(
     generator = torch.Generator(device=device).manual_seed(seed)
 
     print(f"[{src}->{dst}] loading tangent bases for {src}", flush=True)
-    bases = load_tangent_bases(tangent_bases_dir, src)  # basis: (n_rows, D, D), center/pos/vocab_id: (n_rows, ...)
+    bases = load_tangent_bases(tangent_bases_dir, src, sample_idx)  # basis: (n_rows, D, D), center/pos/vocab_id: (n_rows, ...)
 
     print(f"[{src}->{dst}] getting real context activations for sample_idx={sample_idx}", flush=True)
     ctx = context_activations(cfg, src, base_ids)  # (seq, d_model), real values at every position
 
     map_fn = make_subgraph_map(cfg, src, dst)
 
-    layer_key = os.path.join(out_dir, f"{src}.{dst}")
+    layer_key = os.path.join(out_dir, f"{src}.{dst}.sample{sample_idx}")
     writer = ShardedLayerWriter(
         layer_key=layer_key,
         n_rows=seq * n,
@@ -229,7 +237,13 @@ def main():
     p.add_argument("config", type=str, help="Path to a toml ModelConfig")
     p.add_argument("--tangent-bases-dir", required=True,
                    help="--out-dir used by scripts.python.generate_tangent_bases (must be on this node's local scratch)")
-    p.add_argument("--sample-idx", type=int, default=0, help="which base sequence's real activations to splice into")
+    p.add_argument("--sample-idx", type=int, nargs="+", default=[0],
+                   help="one or more base sequences' real activations to splice into")
+    p.add_argument("--samples-per-chunk", type=int, default=1,
+                   help="how many samples to process per progress-reporting group in one process -- purely "
+                        "an overhead/organization knob, same as generate_tangent_bases.py's flag: each "
+                        "sample's tangent-space sampling is always independent (its own tangent bases, own "
+                        "context activations), so this never changes what gets computed")
     p.add_argument("--layers", nargs="*", default=None, help="default: every layer in sweep_dir")
     p.add_argument("--sublayers", nargs="*", default=None,
                    help="only run these src.dst sublayers (default: every cfg.sublayers entry whose input is in --layers)")
@@ -247,8 +261,6 @@ def main():
     layers = args.layers or discover_layer_names(sweep_dir)
     print(f"layers ({len(layers)}): {layers}", flush=True)
 
-    base_ids = load_base_seq(sweep_dir, args.sample_idx)
-
     sublayers = [(s.input, s.output) for s in cfg.sublayers if s.input in layers]
     if args.sublayers is not None:
         wanted = set(args.sublayers)
@@ -257,15 +269,23 @@ def main():
 
     pusher = None if args.no_push else AsyncPusher(max_workers=args.upload_workers)
 
-    for src, dst in sublayers:
-        t0 = time.time()
-        run_sublayer(
-            cfg, sweep_dir, src, dst, args.sample_idx, base_ids, args.tangent_bases_dir,
-            n=args.n, radius=args.radius, seed=args.seed,
-            out_dir=args.out_dir, flush_every=args.flush_every,
-            no_push=args.no_push, pusher=pusher,
-        )
-        print(f"[{src}->{dst}] took {time.time() - t0:.1f}s", flush=True)
+    groups = [
+        args.sample_idx[i:i + args.samples_per_chunk]
+        for i in range(0, len(args.sample_idx), args.samples_per_chunk)
+    ]
+    for group in groups:
+        print(f"\n=== samples {group} ===", flush=True)
+        for sample_idx in group:
+            base_ids = load_base_seq(sweep_dir, sample_idx)
+            for src, dst in sublayers:
+                t0 = time.time()
+                run_sublayer(
+                    cfg, sweep_dir, src, dst, sample_idx, base_ids, args.tangent_bases_dir,
+                    n=args.n, radius=args.radius, seed=args.seed,
+                    out_dir=args.out_dir, flush_every=args.flush_every,
+                    no_push=args.no_push, pusher=pusher,
+                )
+                print(f"[sample {sample_idx}] [{src}->{dst}] took {time.time() - t0:.1f}s", flush=True)
 
 
 if __name__ == "__main__":

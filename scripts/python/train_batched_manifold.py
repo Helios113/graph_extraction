@@ -1,15 +1,22 @@
-"""Trains one batched_autoencoder across every (sublayer, pos) cell of a
-single sample from a scripts.python.generate_perturbed_sweep output directory.
+"""Trains one batched_autoencoder across every (sample, sublayer, pos) cell
+of one or more samples from a scripts.python.generate_perturbed_sweep output
+directory.
 
 Takes a toml ModelConfig (the same one used to produce the sweep via
 scripts.python.generate_perturbed_sweep); sweep_dir is derived from it as
 onnx_models/{cfg.name}/perturbed_sweep (see autoencoder.data.sweep_dir_for).
-For each sublayer, --sample-idx selects one sample's (seq, n_vocab, d_model)
-slice of that sublayer's vec dataset (row order is (sample_idx, pos,
-vocab_idx), so this is a plain reshape+index, no filtering -- see
-scripts/generate_perturbed_sweep.build_chunk_rows). Sublayers and positions
-are then stacked into one (n_sublayers * seq, n_vocab, d_model) tensor and
-trained as a single batched_autoencoder, one model per (sublayer, pos) pair,
+For each sublayer, each --sample-idx value selects one sample's
+(seq, n_vocab, d_model) slice of that sublayer's vec dataset (row order is
+(sample_idx, pos, vocab_idx), so this is a plain reshape+index, no filtering
+-- see scripts/generate_perturbed_sweep.build_chunk_rows). Sublayers and
+positions are stacked into one (n_sublayers * seq, n_vocab, d_model) tensor
+per sample, and every sample's tensor is concatenated into one pool before
+chunking (--n-models-per-chunk), so a single batched GPU training call can
+span several samples' models at once -- each row is still checkpointed to
+its own sample's directory (autoencoder.data.ae_checkpoints_dir_for) with
+its own local (sublayer, pos) numbering, so results are identical to
+training each sample separately, just processed together on GPU. Passing a
+single --sample-idx value (the default) reduces to training one sample,
 data_size = n_vocab (~50k for GPT-2).
 
 Adapted directly from autoencoder/test_script.py -- same knn/mem helpers and
@@ -25,7 +32,7 @@ import torch
 import tqdm
 
 from autoencoder.batched_autoencoder import batched_autoencoder, save_all
-from autoencoder.data import load_sweep_data, sweep_dir_for
+from autoencoder.data import ae_checkpoints_dir_for, load_sweep_data, sweep_dir_for
 from config import load_config
 from execute.sharded_writer import discover_layer_names
 
@@ -107,9 +114,10 @@ def train(
     lam_geom: float = 0.1,
     val_frac: float = 0.1,
     seed: int = 0,
-    model_index_offset: int = 0,
+    model_indices: torch.Tensor | None = None,
     checkpoint_every: int = 0,
-    out_dir: str | None = None,
+    out_dir: str | list[str] | None = None,
+    sample_idx: int | list[int] | None = None,
     verbose: bool = True,
 ) -> tuple[batched_autoencoder, dict]:
     """Core training logic (data already loaded): splits `data` (n_models,
@@ -118,20 +126,30 @@ def train(
     geom loss (each (n_models,), per model row) -- used directly by both
     __main__ and scripts/python/hparam_search.py.
 
-    `model_index_offset`: this call's row 0 is model_index_offset globally --
-    nonzero when `data` is one chunk of a larger run (see main()'s
-    --n-models-per-chunk). Each row's train/val split uses its own
-    independent seed (seed + model_index_offset + row), matching
+    `model_indices`: row i's own (local, per-sample) index -- defaults to
+    plain `range(n_models)` (i.e. this call's row 0 is global index 0) when
+    None, the single-sample case. Pass an explicit (n_models,) tensor when
+    `data` mixes rows from more than one sample (see main()'s multi-sample
+    --sample-idx handling): each row's train/val split uses its own
+    independent seed (seed + model_indices[row]), matching
     batched_autoencoder.reattach exactly, so reattach is correct later
-    regardless of how training was chunked.
+    regardless of how training was chunked or how many samples were mixed
+    into one chunk.
 
     `checkpoint_every`: if > 0 (and `out_dir` given), save_all() the model to
     `out_dir` every this many epochs, overwriting the previous checkpoint --
     so a crash mid-training still leaves the most recently completed
-    checkpoint's weights on disk instead of losing the whole run."""
+    checkpoint's weights on disk instead of losing the whole run.
+
+    `out_dir`/`sample_idx`: forwarded straight to save_all() (see its
+    docstring) for the periodic checkpoints written during training -- may
+    be per-row lists when `data` mixes samples, exactly as save_all accepts;
+    has no effect on training itself."""
     d_model = data.shape[-1]
     n_models = data.shape[0]
     n_points = data.shape[1]
+    if model_indices is None:
+        model_indices = torch.arange(n_models)
 
     # ------------------------------------------------------------ train/val split
     # Same per-row-seeded recipe batched_autoencoder.reattach uses to re-derive
@@ -139,7 +157,7 @@ def train(
     # shared stream -- see reattach's docstring for why.
     n_train_rows = round(n_points * (1 - val_frac))
     perms = torch.stack([
-        torch.randperm(n_points, generator=torch.Generator().manual_seed(seed + model_index_offset + row))
+        torch.randperm(n_points, generator=torch.Generator().manual_seed(seed + int(model_indices[row])))
         for row in range(n_models)
     ])
     train_idx, val_idx = perms[:, :n_train_rows], perms[:, n_train_rows:]
@@ -230,8 +248,7 @@ def train(
             bmnfld.states = train_data
             bmnfld.seed = seed
             bmnfld.n_train_rows = n_train_rows
-            bmnfld.model_index_offset = model_index_offset
-            save_all(bmnfld, out_dir)
+            save_all(bmnfld, out_dir, index_offset=model_indices.tolist(), sample_idx=sample_idx)
             print(f"checkpoint: saved epoch {ep + 1} to {out_dir}", flush=True)
 
     # ---------------------------------------------------------------- train/val metrics
@@ -271,7 +288,7 @@ def train(
     bmnfld.states = train_data
     bmnfld.seed = seed
     bmnfld.n_train_rows = n_train_rows
-    bmnfld.model_index_offset = model_index_offset
+    bmnfld.model_indices = model_indices
 
     metrics = dict(
         train_recon_loss=train_recon_loss.detach().cpu(),
@@ -285,7 +302,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("config", type=str, help="Path to a toml ModelConfig -- sweep_dir is derived as "
                    "onnx_models/{cfg.name}/perturbed_sweep")
-    p.add_argument("--sample-idx", type=int, default=0)
+    p.add_argument("--sample-idx", type=int, nargs="+", default=[0],
+                   help="one or more samples to train on. Multiple values are concatenated into one pool "
+                        "before chunking (see --n-models-per-chunk), so a single batched GPU training call "
+                        "can span several samples' (layer, pos) models at once -- each row still gets "
+                        "checkpointed to its own sample's directory with its own local numbering, so results "
+                        "are identical to running each sample separately, just processed together on GPU")
     p.add_argument("--layers", nargs="*", default=None, help="defaults to every layer in sweep_dir")
     p.add_argument("--network-dims", type=int, nargs="*", default=[512, 32])
     p.add_argument("--k", type=int, default=32)
@@ -298,26 +320,61 @@ def main():
     p.add_argument("--val-frac", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-models-per-chunk", type=int, default=100,
-                   help="train at most this many (layer, pos) models at once, in separate sequential "
-                        "train() calls covering the full data -- caps GPU memory regardless of how many "
-                        "layers/positions the sweep has, while still covering every one of them")
-    p.add_argument("--out-dir", default=None, help="if set, save_all() checkpoints here after training")
+                   help="train at most this many (sample, layer, pos) models at once, in separate sequential "
+                        "train() calls covering the full multi-sample pool -- caps GPU memory regardless of "
+                        "how many layers/positions/samples are combined, while still covering every one of "
+                        "them; a chunk may span more than one sample's models when --sample-idx has multiple "
+                        "values and n-models-per-chunk doesn't divide evenly along sample boundaries")
+    p.add_argument("--out-dir", default=None,
+                   help="root dir for save_all() checkpoints; each sample's models are written under "
+                        "{out-dir}/sample{idx} (default: autoencoder.data.ae_checkpoints_dir_for(cfg, idx) "
+                        "per sample, i.e. $NEW_JAC_SCRATCH/onnx_models/{cfg.name}/ae_checkpoints/sample{idx})")
     p.add_argument("--checkpoint-every", type=int, default=50,
-                   help="save_all() checkpoints to --out-dir every this many epochs during training "
-                        "(overwriting the previous periodic checkpoint), so a crash mid-training still "
-                        "leaves usable weights on disk. 0 disables periodic checkpointing (only the "
-                        "final checkpoint after training completes is saved). No-op without --out-dir")
+                   help="save_all() checkpoints to each sample's out-dir every this many epochs during "
+                        "training (overwriting the previous periodic checkpoint), so a crash mid-training "
+                        "still leaves usable weights on disk. 0 disables periodic checkpointing (only the "
+                        "final checkpoint after each chunk completes is saved)")
+    p.add_argument("--backend", choices=["hetzner", "nfs"], default="hetzner",
+                   help="transport load_sweep_data pulls any not-yet-local sweep shard through -- 'hetzner' "
+                        "(default) via execute.remote_storage, 'nfs' via execute.node_relay's scratch_staging/ "
+                        "relay (e.g. when this run is training on ruapehu against sweep data relayed in from "
+                        "mauao via scripts/helper/sync_node_scratch.sh + node_relay, rather than data pushed "
+                        "to the Hetzner store). Must match how the sweep data being read was actually pushed.")
     args = p.parse_args()
 
-    sweep_dir = sweep_dir_for(load_config(args.config))
+    cfg = load_config(args.config)
+    sweep_dir = sweep_dir_for(cfg)
     print(f"sweep_dir: {sweep_dir}")
-    layers = args.layers or discover_layer_names(sweep_dir)
-    print(f"layers ({len(layers)}): {layers}")
+    full_layers = discover_layer_names(sweep_dir)
+    layers = args.layers or full_layers
+    print(f"layers ({len(layers)} of {len(full_layers)}): {layers}")
 
-    print("loading sweep data", flush=True)
+    def sample_out_dir(sample_idx: int) -> str:
+        return os.path.join(args.out_dir, f"sample{sample_idx}") if args.out_dir else ae_checkpoints_dir_for(cfg, sample_idx)
+
+    # Each row's checkpoint is keyed by a GLOBAL index (layer_idx * seq + pos,
+    # layer_idx = this layer's position in the FULL sweep_dir layer list, not
+    # just in `layers`) rather than a position local to this run's own
+    # `--layers` subset -- otherwise two runs with disjoint --layers into the
+    # same --out-dir both produce model_0.pt, model_1.pt, ... and silently
+    # clobber each other. This is the write-side of the scheme
+    # run_autoencoder_sampled_sweep.py already assumes on the read side (see
+    # its model_indices = model_row_offset + layer_idx * seq + pos).
+    seq = cfg.seq
+    print(f"loading sweep data for samples {args.sample_idx}", flush=True)
     a = time.time()
-    data = load_sweep_data(sweep_dir, layers, args.sample_idx)  # (n_layers * seq, n_vocab, d_model)
-    print(f"loaded {data.shape} in {time.time() - a:.1f}s", flush=True)
+    pools, row_sample_idx, row_local_index = [], [], []
+    for s in args.sample_idx:
+        d = load_sweep_data(sweep_dir, layers, s, backend=args.backend)  # (n_layers * seq, n_vocab, d_model)
+        pools.append(d)
+        row_sample_idx += [s] * d.shape[0]
+        row_local_index += [
+            full_layers.index(layer) * seq + pos for layer in layers for pos in range(seq)
+        ]
+    data = torch.cat(pools, dim=0)
+    row_sample_idx = torch.tensor(row_sample_idx)
+    row_local_index = torch.tensor(row_local_index)
+    print(f"loaded {data.shape} ({len(args.sample_idx)} sample(s)) in {time.time() - a:.1f}s", flush=True)
 
     n_models = data.shape[0]
     chunk_size = args.n_models_per_chunk
@@ -327,13 +384,19 @@ def main():
     for c in range(n_chunks):
         offset = c * chunk_size
         chunk_data = data[offset:offset + chunk_size]
+        chunk_sample_idx = row_sample_idx[offset:offset + chunk_size]
+        chunk_local_index = row_local_index[offset:offset + chunk_size]
         n_chunk_models = chunk_data.shape[0]
-        print(f"\n=== chunk {c + 1}/{n_chunks}: models {offset}..{offset + n_chunk_models - 1} ===", flush=True)
+        print(f"\n=== chunk {c + 1}/{n_chunks}: models {offset}..{offset + n_chunk_models - 1} "
+              f"(samples {sorted(set(chunk_sample_idx.tolist()))}) ===", flush=True)
 
-        if args.out_dir and all(
-            os.path.exists(os.path.join(args.out_dir, f"model_{offset + i}.pt")) for i in range(n_chunk_models)
-        ):
-            print(f"chunk {c + 1}/{n_chunks}: all {n_chunk_models} checkpoints already in {args.out_dir}, skipping", flush=True)
+        chunk_out_dirs = [sample_out_dir(s) for s in chunk_sample_idx.tolist()]
+        done = [
+            os.path.exists(os.path.join(chunk_out_dirs[i], f"model_{chunk_local_index[i].item()}.pt"))
+            for i in range(n_chunk_models)
+        ]
+        if all(done):
+            print(f"chunk {c + 1}/{n_chunks}: all {n_chunk_models} checkpoints already present, skipping", flush=True)
             continue
 
         bmnfld, metrics = train(
@@ -348,14 +411,18 @@ def main():
             lam_geom=args.lam_geom,
             val_frac=args.val_frac,
             seed=args.seed,
-            model_index_offset=offset,
+            model_indices=chunk_local_index,
             checkpoint_every=args.checkpoint_every,
-            out_dir=args.out_dir,
+            out_dir=chunk_out_dirs,
+            sample_idx=chunk_sample_idx.tolist(),
         )
 
-        if args.out_dir:
-            save_all(bmnfld, args.out_dir)
-            print(f"saved chunk {c + 1}/{n_chunks} ({bmnfld.encoder.n_models} checkpoints) to {args.out_dir}")
+        save_all(
+            bmnfld, chunk_out_dirs,
+            index_offset=chunk_local_index.tolist(), sample_idx=chunk_sample_idx.tolist(),
+        )
+        print(f"saved chunk {c + 1}/{n_chunks} ({bmnfld.encoder.n_models} checkpoints) across "
+              f"{len(set(chunk_out_dirs))} sample dir(s)")
 
         # bmnfld.states and train()'s local train_data/val_data/neighbor_idx are GPU-resident
         # (see train()'s docstring) and otherwise stay referenced via bmnfld into the next

@@ -50,7 +50,18 @@ from typing import Literal
 import h5py
 import numpy as np
 
-from execute.remote_storage import AsyncPusher
+from execute.remote_storage import AsyncPusher as HetznerAsyncPusher
+
+Backend = Literal["hetzner", "nfs"]
+
+
+def _async_pusher_cls(backend: Backend):
+    if backend == "hetzner":
+        return HetznerAsyncPusher
+    if backend == "nfs":
+        from execute.node_relay import AsyncPusher as NfsAsyncPusher
+        return NfsAsyncPusher
+    raise ValueError(f"unknown backend {backend!r} -- expected 'hetzner' or 'nfs'")
 
 
 def _scratch_root() -> str:
@@ -123,12 +134,21 @@ class ShardedLayerWriter:
     Ignored if `no_push` is set (nothing is uploaded, so nothing to delete
     either way)."""
     project_root: str = "."
-    pusher: AsyncPusher | None = None
-    """Shared AsyncPusher to upload shards through. `pusher` is typically
-    shared across every layer's writer in a run, so different layers'
-    uploads run concurrently even though each layer is capped individually
-    by `max_in_flight`. When None (default) and `no_push` is False, this
-    writer creates its own single-worker AsyncPusher."""
+    backend: Backend = "hetzner"
+    """Which transport uploads/pulls go through: "hetzner" (default, via
+    execute.remote_storage -- durable SFTP store, survives this cluster
+    disappearing) or "nfs" (via execute.node_relay -- direct scratch ->
+    NFS staging -> scratch relay between two nodes on this same cluster,
+    much faster but not a backup). Use "nfs" for a compute/storage split
+    within this cluster (e.g. compute on ruapehu, large scratch on mauao);
+    ignored if `pusher` is passed explicitly (its own backend wins)."""
+    pusher: object | None = None
+    """Shared AsyncPusher (either backend's) to upload shards through.
+    `pusher` is typically shared across every layer's writer in a run, so
+    different layers' uploads run concurrently even though each layer is
+    capped individually by `max_in_flight`. When None (default) and
+    `no_push` is False, this writer creates its own single-worker
+    AsyncPusher for `backend`."""
     max_in_flight: int = 1
     """Max number of this writer's own shard uploads allowed outstanding at
     once. Starting a new shard beyond this cap first waits for the oldest
@@ -145,7 +165,7 @@ class ShardedLayerWriter:
         self._pending_uploads: list = []  # [(Future, shard dict), ...], oldest first
         self._owns_pusher = False
         if self.pusher is None and not self.no_push:
-            self.pusher = AsyncPusher(max_workers=self.max_in_flight)
+            self.pusher = _async_pusher_cls(self.backend)(max_workers=self.max_in_flight)
             self._owns_pusher = True
 
         self.progress_path = _progress_path(self.project_root, self.layer_key)
@@ -416,6 +436,7 @@ def load_shard_rows(
     layer_key: str,
     dataset_names: list[str] | None = None,
     pull_dir: str | None | Literal[False] = None,
+    backend: Backend = "hetzner",
 ) -> dict[str, np.ndarray]:
     """Loader-side helper: read a layer's manifest, `ensure_local` (pull from
     remote store, if not already local) every shard, and concatenate each
@@ -430,8 +451,18 @@ def load_shard_rows(
     existence check. Defaults to `_scratch_root()` (node-local scratch) --
     every caller pulls onto scratch, never onto NFS, unless it explicitly
     opts out with `pull_dir=False` (the old NFS-under-project_root
-    behavior)."""
-    from execute.remote_storage import ensure_local
+    behavior).
+
+    `backend`: must match whatever the writer that produced this layer used
+    (see ShardedLayerWriter.backend) -- "hetzner" pulls from the SFTP store,
+    "nfs" pulls from scratch_staging/ via execute.node_relay. The caller
+    must already be running on the node it wants shards pulled onto."""
+    if backend == "hetzner":
+        from execute.remote_storage import ensure_local
+    elif backend == "nfs":
+        from execute.node_relay import ensure_local
+    else:
+        raise ValueError(f"unknown backend {backend!r} -- expected 'hetzner' or 'nfs'")
 
     if pull_dir is None:
         pull_dir = _scratch_root()

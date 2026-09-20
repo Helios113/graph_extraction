@@ -9,3 +9,4 @@ logs/*
 *.ptr
 *.json
 *.pt
+*.out

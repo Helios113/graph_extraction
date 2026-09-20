@@ -15,10 +15,17 @@ Mechanism (per layer, per position `pos`):
      scripts.python.generate_tangent_manifold_distances (this reuses the same
      routine) for why eigh beats svd here.
 
-Output: one h5 file per layer, kept on local scratch only (never pushed --
-these are an intermediate artifact for scripts.python.generate_tangent_sweep to
-consume on the same node, not sweep shard data -- see CLAUDE.md), per the
-usual per-sublayer(here: per-layer)/flush-every resilience pattern from
+--sample-idx takes one or more samples; --samples-per-chunk groups them
+purely for progress-reporting/organization (default 1). Each sample's
+k-NN/PCA pass is fully independent (a sample-0 point's neighbors never
+include sample-1 points -- different token contexts), so grouping never
+changes what gets computed.
+
+Output: one h5 file per (sample, layer) -- {layer}.sample{idx}.h5, kept on
+local scratch only (never pushed -- these are an intermediate artifact for
+scripts.python.generate_tangent_sweep to consume on the same node, not sweep
+shard data -- see CLAUDE.md), per the usual per-sublayer(here:
+per-layer)/flush-every resilience pattern from
 execute.sharded_writer.ShardedLayerWriter. Each row holds the full (d_model,
 d_model) orthonormal basis and the (d_model,) center point for one
 (pos, vocab_idx) point of the cloud.
@@ -102,7 +109,13 @@ def run_layer(
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("config", type=str, help="Path to a toml ModelConfig")
-    p.add_argument("--sample-idx", type=int, default=0)
+    p.add_argument("--sample-idx", type=int, nargs="+", default=[0], help="one or more samples to process")
+    p.add_argument("--samples-per-chunk", type=int, default=1,
+                   help="how many samples to process per progress-reporting group in one process -- purely "
+                        "an overhead/organization knob (saves re-invoking the script per sample), since each "
+                        "sample's knn/eigh pass is always independent: a sample-0 point's neighbors can never "
+                        "legitimately include sample-1 points (different token contexts), so this never "
+                        "changes what gets computed, only how the run is grouped/logged")
     p.add_argument("--layers", nargs="*", default=None, help="default: every layer in sweep_dir")
     p.add_argument("--knn-k", type=int, default=None, help="default: cfg.d_model + 1 (full-rank basis)")
     p.add_argument("--query-batch", type=int, default=4096, help="knn_gpu query block size")
@@ -118,13 +131,20 @@ def main():
     layers = args.layers or discover_layer_names(sweep_dir)
     print(f"layers ({len(layers)}): {layers}", flush=True)
 
-    for layer in layers:
-        layer_key = os.path.join(args.out_dir, layer)
-        run_layer(
-            sweep_dir, layer, args.sample_idx, layer_key,
-            knn_k=knn_k, query_batch=args.query_batch,
-            rows_per_block=args.rows_per_block, flush_every=args.flush_every,
-        )
+    groups = [
+        args.sample_idx[i:i + args.samples_per_chunk]
+        for i in range(0, len(args.sample_idx), args.samples_per_chunk)
+    ]
+    for group in groups:
+        print(f"\n=== samples {group} ===", flush=True)
+        for sample_idx in group:
+            for layer in layers:
+                layer_key = os.path.join(args.out_dir, f"{layer}.sample{sample_idx}")
+                run_layer(
+                    sweep_dir, layer, sample_idx, layer_key,
+                    knn_k=knn_k, query_batch=args.query_batch,
+                    rows_per_block=args.rows_per_block, flush_every=args.flush_every,
+                )
 
 
 if __name__ == "__main__":
