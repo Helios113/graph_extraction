@@ -25,10 +25,10 @@ set -euo pipefail
 cd /nfs-share/pa511/code_bases/new_jac
 mkdir -p logs
 
-SUBPATH="${1:?Usage: sbatch nfs_to_scratch.sh <subpath under scratch_staging/>}"
+SUBPATH="${1:?Usage: sbatch nfs_to_scratch.sh <subpath under /nfs-share/datasets/\$USER/>}"
 
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
-STAGING_ROOT="/nfs-share/pa511/code_bases/new_jac/scratch_staging"
+STAGING_ROOT="/nfs-share/datasets/${USER}"
 
 SRC="${STAGING_ROOT}/${SUBPATH}"
 DEST="${NEW_JAC_SCRATCH}/${SUBPATH}"
@@ -47,5 +47,12 @@ if [ -d "${SRC}" ]; then
 else
     rsync -a --info=progress2 "${SRC}" "${DEST}"
 fi
+
+# NFS staging is a transient relay point, not storage (see node_relay.py's
+# STAGING_ROOT, a fixed-size per-user ZFS quota) -- only reached once rsync
+# above has exited 0 (set -e would have already killed this script
+# otherwise), so DEST is a confirmed full copy before SRC is removed.
+echo "cleaning up NFS staging copy at ${SRC}"
+rm -rf "${SRC}"
 
 echo "done: $(hostname) scratch now has ${DEST}"

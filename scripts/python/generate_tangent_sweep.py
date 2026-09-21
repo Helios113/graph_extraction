@@ -11,12 +11,19 @@ tangent-space sampling is fully independent -- its own tangent bases (see
 scripts.python.generate_tangent_bases), own context activations
 (base_seqs[sample_idx]) -- so grouping never changes what gets computed.
 
-Mechanism (per sample, per sublayer, per position `pos`):
+--radius also takes one or more values: every (sample, sublayer)'s already-
+loaded tangent bases and context activations are reused across all requested
+radii (only the ball-sampling step and the ONNX forward pass re-run per
+radius), and each radius gets its own output layer_key so runs at different
+radii can complete/resume/push independently, same as --alpha in
+scripts.python.run_autoencoder_sampled_sweep.
+
+Mechanism (per sample, per sublayer, per radius, per position `pos`):
   1. Anchor: draw n indices uniformly (with replacement) from src's
      (basis, center) rows at position `pos`, as saved by
      scripts.python.generate_tangent_bases to local scratch for that sample.
   2. Sample: draw a point uniformly in the d_model-dimensional ball of
-     radius --radius in that anchor's tangent basis, then map it back to
+     radius `radius` in that anchor's tangent basis, then map it back to
      ambient space and add it to the anchor's center (same
      sample_ball_in_tangent_basis_batch_gpu used by
      scripts.python.generate_tangent_manifold_distances).
@@ -29,14 +36,14 @@ Mechanism (per sample, per sublayer, per position `pos`):
   5. Run the full (1, seq, d_model) spliced tensor through the {src}.{dst}
      subgraph (ensure_subgraphs) and read dst at position `pos`.
 
-Output: one h5 file per (sample, sublayer) -- {src}.{dst}.sample{idx}.h5
-(see execute.sharded_writer.ShardedLayerWriter and CLAUDE.md's per-sublayer
-resilience pattern), pushed as soon as that (sample, sublayer) finishes.
-Each row holds the sampled src vector, the real dst vector, the position,
-and the anchor index (which real point's tangent ball the sample was drawn
-from); multiplicity is always 1 (no ball-membership concept applies here)
-and is kept only for schema parity with run_sampled_sweep's/
-generate_ambient_sweep's h5 files.
+Output: one h5 file per (sample, sublayer, radius) --
+{src}.{dst}.radius{r}.sample{idx}.h5 (see execute.sharded_writer.ShardedLayerWriter
+and CLAUDE.md's per-sublayer resilience pattern), pushed as soon as that
+(sample, sublayer, radius) finishes. Each row holds the sampled src vector,
+the real dst vector, the position, and the anchor index (which real point's
+tangent ball the sample was drawn from); multiplicity is always 1 (no
+ball-membership concept applies here) and is kept only for schema parity
+with run_sampled_sweep's/generate_ambient_sweep's h5 files.
 """
 
 import argparse
@@ -51,8 +58,8 @@ import torch
 from autoencoder.data import sweep_dir_for
 from config import ModelConfig, load_config
 from construct.construct import ensure_base_model, ensure_extra_outputs, ensure_subgraphs
-from execute.remote_storage import AsyncPusher
-from execute.sharded_writer import ShardedLayerWriter, discover_layer_names, load_shard_rows
+from execute.remote_storage import AsyncPusher as HetznerAsyncPusher
+from execute.sharded_writer import Backend, ShardedLayerWriter, discover_layer_names, load_shard_rows
 from scripts.python.generate_tangent_manifold_distances import sample_ball_in_tangent_basis_batch_gpu
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -170,16 +177,16 @@ def run_sublayer(
     base_ids: np.ndarray,
     tangent_bases_dir: str,
     n: int,
-    radius: float,
+    radii: list[float],
     seed: int,
     out_dir: str,
     flush_every: int,
     no_push: bool,
-    pusher: AsyncPusher | None,
+    backend: Backend,
+    pusher: object | None,
 ) -> None:
     seq = cfg.seq
     d_model = cfg.d_model
-    generator = torch.Generator(device=device).manual_seed(seed)
 
     print(f"[{src}->{dst}] loading tangent bases for {src}", flush=True)
     bases = load_tangent_bases(tangent_bases_dir, src, sample_idx)  # basis: (n_rows, D, D), center/pos/vocab_id: (n_rows, ...)
@@ -189,47 +196,51 @@ def run_sublayer(
 
     map_fn = make_subgraph_map(cfg, src, dst)
 
-    layer_key = os.path.join(out_dir, f"{src}.{dst}.sample{sample_idx}")
-    writer = ShardedLayerWriter(
-        layer_key=layer_key,
-        n_rows=seq * n,
-        schema={
-            "src_vec": ((d_model,), "float32"),
-            "dst_vec": ((d_model,), "float32"),
-            "pos": ((), "int64"),
-            "anchor": ((), "int64"),
-            "multiplicity": ((), "int64"),
-        },
-        shard_rows=max(seq * n, 1),
-        flush_every=flush_every,
-        no_push=no_push,
-        attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, radius=radius),
-        pusher=pusher,
-    )
+    for radius in radii:
+        generator = torch.Generator(device=device).manual_seed(seed)
 
-    row = writer.next_row
-    for pos in range(seq):
-        at_pos = bases["pos"] == pos
-        pts, anchor = tangent_sample(
-            bases["basis"][at_pos], bases["center"][at_pos], n, radius, generator,
-        )  # (n, d_model), (n,) -- anchor indexes into this pos's rows
-
-        spliced = np.broadcast_to(ctx, (n, seq, d_model)).copy()  # (n, seq, d_model)
-        spliced[:, pos] = pts
-        out = map_fn(spliced.astype(np.float32))  # (n, seq, d_model)
-        dst_vecs = np.ascontiguousarray(out[:, pos])  # (n, d_model)
-
-        writer.write_rows(
-            row, row + n,
-            src_vec=pts, dst_vec=dst_vecs,
-            pos=np.full(n, pos, dtype=np.int64),
-            anchor=anchor, multiplicity=np.ones(n, dtype=np.int64),
+        layer_key = os.path.join(out_dir, f"{src}.{dst}.radius{radius:g}.sample{sample_idx}")
+        writer = ShardedLayerWriter(
+            layer_key=layer_key,
+            n_rows=seq * n,
+            schema={
+                "src_vec": ((d_model,), "float32"),
+                "dst_vec": ((d_model,), "float32"),
+                "pos": ((), "int64"),
+                "anchor": ((), "int64"),
+                "multiplicity": ((), "int64"),
+            },
+            shard_rows=max(seq * n, 1),
+            flush_every=flush_every,
+            no_push=no_push,
+            backend=backend,
+            attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, radius=radius),
+            pusher=pusher,
         )
-        row += n
-        print(f"[{src}->{dst}] pos={pos}: sampled {n} tangent-space points", flush=True)
 
-    writer.close()
-    print(f"[{src}->{dst}] done -> {layer_key}", flush=True)
+        row = writer.next_row
+        for pos in range(seq):
+            at_pos = bases["pos"] == pos
+            pts, anchor = tangent_sample(
+                bases["basis"][at_pos], bases["center"][at_pos], n, radius, generator,
+            )  # (n, d_model), (n,) -- anchor indexes into this pos's rows
+
+            spliced = np.broadcast_to(ctx, (n, seq, d_model)).copy()  # (n, seq, d_model)
+            spliced[:, pos] = pts
+            out = map_fn(spliced.astype(np.float32))  # (n, seq, d_model)
+            dst_vecs = np.ascontiguousarray(out[:, pos])  # (n, d_model)
+
+            writer.write_rows(
+                row, row + n,
+                src_vec=pts, dst_vec=dst_vecs,
+                pos=np.full(n, pos, dtype=np.int64),
+                anchor=anchor, multiplicity=np.ones(n, dtype=np.int64),
+            )
+            row += n
+            print(f"[{src}->{dst}] radius={radius:g} pos={pos}: sampled {n} tangent-space points", flush=True)
+
+        writer.close()
+        print(f"[{src}->{dst}] radius={radius:g} done -> {layer_key}", flush=True)
 
 
 def main():
@@ -248,12 +259,24 @@ def main():
     p.add_argument("--sublayers", nargs="*", default=None,
                    help="only run these src.dst sublayers (default: every cfg.sublayers entry whose input is in --layers)")
     p.add_argument("--n", type=int, default=1000, help="samples per (sublayer, position)")
-    p.add_argument("--radius", type=float, default=0.1, help="radius of the tangent-space ball to sample from")
+    p.add_argument("--radius", type=float, nargs="+", default=[0.1],
+                   help="one or more radii of the tangent-space ball to sample from -- each gets its own "
+                        "output layer_key ({src}.{dst}.radius{r}.sample{idx}), sharing this (sample, "
+                        "sublayer)'s already-loaded tangent bases/context activations across radii instead "
+                        "of reloading them per radius (same grouping benefit --samples-per-chunk gives "
+                        "across samples)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--flush-every", type=int, default=10)
     p.add_argument("--no-push", action="store_true")
     p.add_argument("--upload-workers", type=int, default=4)
+    p.add_argument("--backend", choices=["hetzner", "nfs"], default="nfs",
+                   help="transport ShardedLayerWriter pushes each finished sublayer's shards through -- "
+                        "'nfs' (default) via execute.node_relay's NFS-staging relay (e.g. when this run's "
+                        "compute node isn't where the data should durably land, and a later step relays "
+                        "it in via scripts/helper/sync_node_scratch.sh), 'hetzner' via "
+                        "execute.remote_storage (not used by this project's own launchers anymore). "
+                        "Ignored if --no-push is also set.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -267,7 +290,11 @@ def main():
         sublayers = [(src, dst) for src, dst in sublayers if f"{src}.{dst}" in wanted]
     print(f"{len(sublayers)} sublayer(s) to run: {sublayers}", flush=True)
 
-    pusher = None if args.no_push else AsyncPusher(max_workers=args.upload_workers)
+    pusher_cls = HetznerAsyncPusher
+    if args.backend == "nfs":
+        from execute.node_relay import AsyncPusher as NfsAsyncPusher
+        pusher_cls = NfsAsyncPusher
+    pusher = None if args.no_push else pusher_cls(max_workers=args.upload_workers)
 
     groups = [
         args.sample_idx[i:i + args.samples_per_chunk]
@@ -281,9 +308,9 @@ def main():
                 t0 = time.time()
                 run_sublayer(
                     cfg, sweep_dir, src, dst, sample_idx, base_ids, args.tangent_bases_dir,
-                    n=args.n, radius=args.radius, seed=args.seed,
+                    n=args.n, radii=args.radius, seed=args.seed,
                     out_dir=args.out_dir, flush_every=args.flush_every,
-                    no_push=args.no_push, pusher=pusher,
+                    no_push=args.no_push, backend=args.backend, pusher=pusher,
                 )
                 print(f"[sample {sample_idx}] [{src}->{dst}] took {time.time() - t0:.1f}s", flush=True)
 

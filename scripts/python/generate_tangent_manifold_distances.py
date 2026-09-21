@@ -40,6 +40,66 @@ def batch_full_tangent_basis(neighbors: torch.Tensor) -> torch.Tensor:
     return evecs.transpose(-1, -2).flip(dims=[1])  # (B, D, D)
 
 
+def batch_dual_tangent_basis(neighbors: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    """Dual/kernel-PCA counterpart to batch_full_tangent_basis, for K < D (e.g.
+    --knn-k smaller than cfg.d_model): batched equivalent of
+    estimate_local_tangent_space_p_var(..., p=1) via eigh on the (B, K, K)
+    Gram matrix of centered neighbor differences, instead of the (B, D, D)
+    covariance matrix.
+
+    Both eigh's give the same nonzero eigenvalues/eigenvectors (up to the
+    standard SVD<->eigh duality: for centered X (K, D), eigh(X @ X.T) and
+    eigh(X.T @ X) share nonzero eigenvalues, and left/right singular vectors
+    u_i, v_i are related by v_i = X.T @ u_i / sqrt(eigenvalue_i)), so this
+    is mathematically equivalent to batch_full_tangent_basis, just cheaper
+    (and the only option that works at all) when K << D: eigh here costs
+    O(K^3) on a (B, K, K) matrix rather than O(D^3) on (B, D, D).
+
+    neighbors: (B, K, D). Centering removes one degree of freedom, so the
+    tangent space has rank at most K-1 -- the eigh on the (K, K) Gram matrix
+    always produces one near-zero (numerically: possibly slightly negative)
+    eigenvalue. Its eigenvector is a legitimate direction in the K-point
+    coordinate system, but lifting it to D-dim via v = X.T @ u / sqrt(eigval)
+    amplifies whatever floating-point noise is in that near-zero eigenvalue
+    into an arbitrary, meaningless D-dim direction -- dividing by ~0 rather
+    than a real signal. Rather than return that garbage row (which would
+    silently corrupt sample_ball_in_tangent_basis_batch_gpu's sampling), the
+    last row is replaced with a direction orthogonal to the other K-1 lifted
+    vectors via QR, orthonormal but not meaningfully "the K-th principal
+    direction" -- equivalent in effect to how batch_full_tangent_basis
+    always returns a full D-dim orthonormal set even though only K-1 of
+    those directions come from real neighbor variance.
+
+    Returns (B, K, D): row i is the i-th tangent direction, unit norm and
+    mutually orthogonal (rows descending eigenvalue order, matching
+    batch_full_tangent_basis; last row is the QR-completed filler above).
+    """
+    B, K, D = neighbors.shape
+    assert K <= D, (
+        f"batch_dual_tangent_basis expects knn_k <= d_model (got K={K}, D={D}); "
+        f"use batch_full_tangent_basis for K > D"
+    )
+    centered = neighbors - neighbors.mean(dim=1, keepdim=True)  # (B, K, D)
+    gram = torch.matmul(centered, centered.transpose(-1, -2))  # (B, K, K)
+    evals, evecs = torch.linalg.eigh(gram)  # ascending order
+    evals = evals.flip(dims=[-1])  # (B, K)
+    evecs = evecs.flip(dims=[-1])  # (B, K, K), columns match evals order
+
+    # Lift the top K-1 eigenvectors (real signal) back to D-dim: v_i = X.T @
+    # u_i / sqrt(eigenvalue_i), then row-normalize against fp roundoff.
+    top = evecs[..., :, : K - 1]  # (B, K, K-1)
+    lifted = torch.matmul(top.transpose(-1, -2), centered)  # (B, K-1, D)
+    lifted = lifted / evals[..., : K - 1].clamp_min(eps).sqrt().unsqueeze(-1)
+    lifted = lifted / lifted.norm(dim=-1, keepdim=True).clamp_min(eps)
+
+    # QR-complete one more direction orthogonal to `lifted`, standing in for
+    # the degenerate K-th eigenvector this method cannot recover from data.
+    q, _ = torch.linalg.qr(lifted.transpose(-1, -2), mode="complete")  # (B, D, D)
+    filler = q[..., :, K - 1]  # (B, D) -- one column outside lifted's span
+
+    return torch.cat([lifted, filler.unsqueeze(1)], dim=1)  # (B, K, D)
+
+
 def sample_ball_in_tangent_basis_batch_gpu(
     basis: torch.Tensor,
     center: torch.Tensor,

@@ -69,8 +69,8 @@ from autoencoder.batched_autoencoder import load_batched_multi
 from autoencoder.data import ae_checkpoints_dir_for, load_sweep_data, sweep_dir_for
 from config import ModelConfig, load_config
 from construct.construct import ensure_base_model, ensure_extra_outputs, ensure_subgraphs
-from execute.remote_storage import AsyncPusher
-from execute.sharded_writer import ShardedLayerWriter, discover_layer_names
+from execute.remote_storage import AsyncPusher as HetznerAsyncPusher
+from execute.sharded_writer import Backend, ShardedLayerWriter, discover_layer_names
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -188,7 +188,8 @@ def _write_variant(
     sample_idx: int,
     flush_every: int,
     no_push: bool,
-    pusher: AsyncPusher | None,
+    backend: Backend,
+    pusher: object | None,
 ) -> None:
     """Shared write loop for both AE-manifold samples and noise variants --
     splices each position's already-drawn points into the real per-position
@@ -211,6 +212,7 @@ def _write_variant(
         shard_rows=max(seq * n, 1),
         flush_every=flush_every,
         no_push=no_push,
+        backend=backend,
         attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, **extra_attrs),
         pusher=pusher,
     )
@@ -259,7 +261,8 @@ def run_sublayer(
     out_dir: str,
     flush_every: int,
     no_push: bool,
-    pusher: AsyncPusher | None,
+    backend: Backend,
+    pusher: object | None,
 ) -> None:
     """`model_row_offset`: row index in `model` where this sample_idx's own
     (layer, pos) block starts -- 0 when `model` holds a single sample
@@ -308,7 +311,7 @@ def run_sublayer(
             seq=seq, d_model=d_model, n=n,
             pts_by_pos=pts_by_pos, anchor_by_pos=anchor_by_pos, multiplicity_by_pos=mult_by_pos,
             ctx=ctx, map_fn=map_fn, extra_attrs=dict(alpha=alpha, radius=radius, variant="alpha"),
-            sample_idx=sample_idx, flush_every=flush_every, no_push=no_push, pusher=pusher,
+            sample_idx=sample_idx, flush_every=flush_every, no_push=no_push, backend=backend, pusher=pusher,
         )
 
     if noise_levels:
@@ -352,7 +355,7 @@ def run_sublayer(
                 seq=seq, d_model=d_model, n=n,
                 pts_by_pos=pts_by_pos, anchor_by_pos=anchor_by_pos, multiplicity_by_pos=mult_by_pos,
                 ctx=ctx, map_fn=map_fn, extra_attrs=dict(noise_level=level, variant="noise"),
-                sample_idx=sample_idx, flush_every=flush_every, no_push=no_push, pusher=pusher,
+                sample_idx=sample_idx, flush_every=flush_every, no_push=no_push, backend=backend, pusher=pusher,
             )
 
 
@@ -412,6 +415,13 @@ def main():
     p.add_argument("--flush-every", type=int, default=10)
     p.add_argument("--no-push", action="store_true")
     p.add_argument("--upload-workers", type=int, default=4)
+    p.add_argument("--backend", choices=["hetzner", "nfs"], default="nfs",
+                   help="transport ShardedLayerWriter pushes each finished (sublayer, variant)'s shards "
+                        "through, and load_sweep_data pulls this sample's perturbed-sweep cloud through -- "
+                        "'nfs' (default) via execute.node_relay's NFS-staging relay, 'hetzner' via "
+                        "execute.remote_storage (not used by this project's own launchers anymore). Must "
+                        "match how the sweep data being read was actually pushed; ignored on the write side "
+                        "if --no-push is also set.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -426,7 +436,11 @@ def main():
         sublayers = [(src, dst) for src, dst in sublayers if f"{src}.{dst}" in wanted]
     print(f"{len(sublayers)} sublayer(s) to run: {sublayers}", flush=True)
 
-    pusher = None if args.no_push else AsyncPusher(max_workers=args.upload_workers)
+    pusher_cls = HetznerAsyncPusher
+    if args.backend == "nfs":
+        from execute.node_relay import AsyncPusher as NfsAsyncPusher
+        pusher_cls = NfsAsyncPusher
+    pusher = None if args.no_push else pusher_cls(max_workers=args.upload_workers)
 
     if args.ae_checkpoints_dir is not None:
         assert len(args.sample_idx) == 1, (
@@ -451,7 +465,9 @@ def main():
         model.eval()
 
         print("reattaching states and computing fit_stats (latent_codes/latent_scale) for sampling", flush=True)
-        full_activations = torch.cat([load_sweep_data(sweep_dir, layers, s) for s in group], dim=0)
+        full_activations = torch.cat(
+            [load_sweep_data(sweep_dir, layers, s, backend=args.backend) for s in group], dim=0,
+        )
         model.reattach(full_activations.to(device))
         model.fit_stats(knn_chunk=args.knn_chunk, knn_model_chunk=args.knn_model_chunk)
 
@@ -467,7 +483,7 @@ def main():
                     seed=args.seed, jacobian_chunk=args.jacobian_chunk, jacobian_model_chunk=args.jacobian_model_chunk,
                     support_chunk=args.support_chunk, support_model_chunk=args.support_model_chunk,
                     out_dir=args.out_dir, flush_every=args.flush_every,
-                    no_push=args.no_push, pusher=pusher,
+                    no_push=args.no_push, backend=args.backend, pusher=pusher,
                 )
                 print(f"[sample {sample_idx}] [{src}->{dst}] took {time.time() - t0:.1f}s", flush=True)
 

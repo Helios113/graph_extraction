@@ -280,7 +280,7 @@ def main():
     p.add_argument("config", type=str, help="Path to a toml ModelConfig")
     p.add_argument("--sample-idx", type=int, nargs="+", default=[0],
                    help="forwarded to train_batched_manifold.py's --sample-idx for every batch")
-    p.add_argument("--target-batch-gb", type=float, default=500.0,
+    p.add_argument("--target-batch-gb", type=float, default=250.0,
                    help="group layers into batches that each stay under this many GB on disk")
     p.add_argument("--compute-node", default="ruapehu", help="node training runs on")
     p.add_argument("--storage-node", default="mauao", help="node the full sweep input + accumulated checkpoints live on")
@@ -289,6 +289,7 @@ def main():
     p.add_argument("--n-models-per-chunk", type=int, default=200, help="forwarded to train_batched_manifold.py")
     p.add_argument("--epochs", type=int, default=200, help="forwarded to train_batched_manifold.py")
     p.add_argument("--checkpoint-every", type=int, default=50, help="forwarded to train_batched_manifold.py")
+    p.add_argument("--lr", type=float, default=None, help="forwarded to train_batched_manifold.py's --lr (default: that script's own default)")
     p.add_argument("--skip-reclaim", action="store_true", help="leave each batch's input data on the compute node after training (debugging only)")
     p.add_argument("--dry-run", action="store_true", help="print the planned batches and exit without submitting anything")
     args = p.parse_args()
@@ -329,21 +330,37 @@ def main():
 
         layer_subpaths = [layer_subpath_for[l] for l in batch_layers]
 
-        print(f"relaying {len(layer_subpaths)} layer(s) {args.storage_node} -> {args.compute_node} ...", flush=True)
-        relay_in_jobs = [
-            _relay(args.storage_node, args.compute_node, sp, time_limit=args.relay_time_limit)
-            for sp in layer_subpaths
+        # Skip subpaths a previous (e.g. crashed/cancelled) run already relayed onto
+        # compute_node and never reclaimed -- compare against storage_node's size
+        # (already measured above) rather than just presence, so a partial leftover
+        # copy from an interrupted relay still gets re-relayed instead of silently
+        # treated as complete.
+        present_sizes_gb = _layer_sizes_gb(args.compute_node, layer_subpaths)
+        to_relay = [
+            sp for sp in layer_subpaths
+            if abs(present_sizes_gb.get(sp, -1) - sizes_by_subpath[sp]) > 0.01
         ]
-        _wait_for_jobs(relay_in_jobs)
-        failed = [j for j in relay_in_jobs if not _job_succeeded(j)]
-        if failed:
-            raise RuntimeError(f"batch {i + 1}: relay-in job(s) {failed} did not complete -- see logs/nfs_to_scratch_<job>.out")
+        already_present = [sp for sp in layer_subpaths if sp not in to_relay]
+        if already_present:
+            print(f"already present on {args.compute_node}, skipping relay for: {already_present}", flush=True)
+
+        if to_relay:
+            print(f"relaying {len(to_relay)} layer(s) {args.storage_node} -> {args.compute_node} ...", flush=True)
+            relay_in_jobs = [
+                _relay(args.storage_node, args.compute_node, sp, time_limit=args.relay_time_limit)
+                for sp in to_relay
+            ]
+            _wait_for_jobs(relay_in_jobs)
+            failed = [j for j in relay_in_jobs if not _job_succeeded(j)]
+            if failed:
+                raise RuntimeError(f"batch {i + 1}: relay-in job(s) {failed} did not complete -- see logs/nfs_to_scratch_<job>.out")
 
         print(f"training batch {i + 1}/{len(batches)} on {args.compute_node} ...", flush=True)
         train_job = _submit_training_job(
             args.config, batch_layers, args.sample_idx, args.compute_node,
             n_models_per_chunk=args.n_models_per_chunk, epochs=args.epochs,
             checkpoint_every=args.checkpoint_every, time_limit=args.train_time_limit,
+            lr=args.lr,
         )
         _wait_for_jobs([train_job])
         if not _job_succeeded(train_job):
@@ -375,6 +392,7 @@ _TRAIN_LAUNCHER = os.path.join(
 def _submit_training_job(
     config_path: str, layers: list[str], sample_idx: list[int], node: str,
     n_models_per_chunk: int, epochs: int, checkpoint_every: int, time_limit: str,
+    lr: float | None = None,
 ) -> str:
     """Submits scripts/batch_scripts/tiny_llama/train_batched_manifold_ruapehu.sh
     (a thin `exec uv run python -m scripts.python.train_batched_manifold "$@"`
@@ -397,6 +415,8 @@ def _submit_training_job(
         # (NFS staging + node_relay), not pushed to Hetzner -- see this batch's relay-in step.
         "--backend", "nfs",
     ]
+    if lr is not None:
+        cmd += ["--lr", str(lr)]
     return _sbatch(cmd)
 
 

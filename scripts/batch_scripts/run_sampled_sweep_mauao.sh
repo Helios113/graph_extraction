@@ -28,7 +28,7 @@ echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, ae dir ${AE_
 exec uv run python -m scripts.python.run_autoencoder_sampled_sweep \
     "${CONFIG}" \
     --ae-checkpoints-dir "${AE_CHECKPOINTS_DIR}" \
-    --out-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/ae_sampled_sweep" \
+    --out-dir "onnx_models/${NAME}/ae_sampled_sweep" \
     --n 1000 \
     --alpha ${ALPHA} \
     ${NOISE:+--noise ${NOISE}}

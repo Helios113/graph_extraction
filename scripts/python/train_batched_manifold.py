@@ -67,8 +67,45 @@ def chunked_recon_loss(bmnfld: batched_autoencoder, x: torch.Tensor, chunk_size:
     for s in range(0, n_points, chunk_size):
         chunk = x[:, s:s + chunk_size]
         recon = bmnfld.project(chunk)
-        sq_err_sum += ((recon - chunk) ** 2).sum(-1).sum(-1)
+        sq_err_sum += ((recon - chunk) ** 2).mean(-1).sum(-1)
     return sq_err_sum / n_points
+
+
+def chunked_encode(bmnfld: batched_autoencoder, x: torch.Tensor, model_chunk: int) -> torch.Tensor:
+    """bmnfld.encode(x), chunked along the model dim in model_chunk-sized
+    groups. x is already point-chunked by its caller (a (n_models, B*k,
+    d_model) neighbor-encode call inside an outer per-batch loop), but that
+    leaves the model dim -- which can be the full chunk_size worth of models
+    a training run loaded at once -- unchunked, so encode()'s activation
+    still scales with n_models * (B*k) in one shot. This is the same
+    unchunked-model-dim gap chunked_recon_loss's point-only chunking doesn't
+    cover (see CLAUDE.md's "chunk the model dim too" note).
+
+    Can't just slice x and call bmnfld.encode(x[m:m+model_chunk]): encode()
+    closes over the *full* self.encoder.weights/self.center/self.scale
+    (each (n_models, ...)), and BatchedMLP_no_bias.forward's torch.bmm
+    requires the weight tensor's model dim to match the input's exactly (see
+    the "size of tensor a (model_chunk) must match tensor b (n_models)"
+    broadcast error this raises otherwise) -- so this instead slices
+    center/scale/each encoder weight to the same model-chunk range and
+    replicates BatchedMLP_no_bias.forward's bmm loop directly, the same
+    pattern jacobian() uses for the decoder's weights.
+
+    Not decorated with @torch.no_grad(): the training-loop call site needs
+    gradients to flow through it for backward(); callers computing metrics
+    under an outer `with torch.no_grad():` get no-grad behavior from that
+    context instead."""
+    n_models = x.shape[0]
+    encoder = bmnfld.encoder
+    outs = []
+    for m in range(0, n_models, model_chunk):
+        h = (x[m:m + model_chunk].to(bmnfld.device) - bmnfld.center[m:m + model_chunk]) / bmnfld.scale[m:m + model_chunk]
+        for i in range(encoder.n_layers):
+            h = torch.bmm(h, encoder.weights[i][m:m + model_chunk])
+            if i != encoder.n_layers - 1:
+                h = encoder.activation(h)
+        outs.append(h)
+    return torch.cat(outs, dim=0)
 
 
 @torch.no_grad()
@@ -112,6 +149,7 @@ def train(
     batch_size: int = 96,
     lr: float = 2e-3,
     lam_geom: float = 0.1,
+    grad_clip: float = 1.0,
     val_frac: float = 0.1,
     seed: int = 0,
     model_indices: torch.Tensor | None = None,
@@ -144,7 +182,15 @@ def train(
     `out_dir`/`sample_idx`: forwarded straight to save_all() (see its
     docstring) for the periodic checkpoints written during training -- may
     be per-row lists when `data` mixes samples, exactly as save_all accepts;
-    has no effect on training itself."""
+    has no effect on training itself.
+
+    `grad_clip`: max grad norm passed to clip_grad_norm_ before each opt.step().
+
+    Tracks the epoch with the lowest mean (across models) validation recon
+    loss, and before returning (and before any periodic/final checkpoint is
+    saved) resets the whole model's weights to that epoch's snapshot -- so
+    both the periodic checkpoints and save_all's final one reflect the
+    best-on-average-validation weights rather than the final epoch's."""
     d_model = data.shape[-1]
     n_models = data.shape[0]
     n_points = data.shape[1]
@@ -203,6 +249,33 @@ def train(
     model_arange = torch.arange(n_models, device=device)[:, None, None]
     epoch_iter = tqdm.tqdm(range(epochs), desc="fit") if verbose else range(epochs)
 
+    # Best-on-validation tracking: keeps a CPU snapshot of encoder/decoder
+    # weights from the epoch with the lowest mean (across models) val recon
+    # loss seen so far.
+    best_val_loss = float("inf")
+    best_encoder_weights = [w.detach().cpu().clone() for w in bmnfld.encoder.weights]
+    best_decoder_weights = [w.detach().cpu().clone() for w in bmnfld.decoder.weights]
+
+    @torch.no_grad()
+    def with_best_val_weights(fn):
+        """Temporarily swaps bmnfld's live weights for the best-val-epoch
+        snapshot, calls fn(), then restores the live (still-training)
+        weights -- so a mid-training checkpoint can save best-val weights
+        without disturbing the optimizer's actual trajectory."""
+        live_encoder = [w.detach().clone() for w in bmnfld.encoder.weights]
+        live_decoder = [w.detach().clone() for w in bmnfld.decoder.weights]
+        for w, best_w in zip(bmnfld.encoder.weights, best_encoder_weights):
+            w.copy_(best_w.to(device))
+        for w, best_w in zip(bmnfld.decoder.weights, best_decoder_weights):
+            w.copy_(best_w.to(device))
+        try:
+            fn()
+        finally:
+            for w, live_w in zip(bmnfld.encoder.weights, live_encoder):
+                w.copy_(live_w)
+            for w, live_w in zip(bmnfld.decoder.weights, live_decoder):
+                w.copy_(live_w)
+
     for ep in epoch_iter:
         a = time.time()
 
@@ -217,8 +290,8 @@ def train(
             neighbors = train_data[model_arange, nbr_idx]  # (n_models, B, k, d_model)
 
             z = bmnfld.encode(x)  # (n_models, B, latent)
-            z_neighbors = bmnfld.encode(
-                neighbors.reshape(n_models, -1, neighbors.shape[-1])
+            z_neighbors = chunked_encode(
+                bmnfld, neighbors.reshape(n_models, -1, neighbors.shape[-1]), knn_model_chunk
             ).reshape(n_models, x.shape[1], bmnfld.n_neighbors, bmnfld.latent_dim)
 
             x_recon = bmnfld.decode(z)
@@ -226,32 +299,57 @@ def train(
             ambient_dist = (neighbors - x[:, :, None]).norm(dim=-1)
             latent_dist = (z_neighbors - z[:, :, None]).norm(dim=-1)
 
-            recon_loss = ((x_recon - x) ** 2).sum(-1).mean()
+            recon_loss = ((x_recon - x) ** 2).mean(-1).mean()
             geom_loss = ((latent_dist - ambient_dist) ** 2).mean() / (ambient_dist ** 2).mean()
 
             loss = recon_loss + lam_geom * geom_loss
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(bmnfld.parameters(), grad_clip)
             opt.step()
 
-        epoch_val_recon_loss = chunked_recon_loss(bmnfld, val_data, batch_size).mean().item()
+        epoch_val_recon_loss = chunked_recon_loss(bmnfld, val_data, batch_size)  # (n_models,)
+        mean_val_recon_loss = epoch_val_recon_loss.mean().item()
+
+        if mean_val_recon_loss < best_val_loss:
+            best_val_loss = mean_val_recon_loss
+            for w, best_w in zip(bmnfld.encoder.weights, best_encoder_weights):
+                best_w.copy_(w.detach().cpu())
+            for w, best_w in zip(bmnfld.decoder.weights, best_decoder_weights):
+                best_w.copy_(w.detach().cpu())
 
         if verbose:
             print(
                 f"epoch {ep} time: {time.time() - a:.1f}s  recon: {recon_loss.item():.4f}  "
-                f"geom: {geom_loss.item():.4f}  val_recon: {epoch_val_recon_loss:.4f}"
+                f"geom: {geom_loss.item():.4f}  val_recon: {mean_val_recon_loss:.4f}  "
+                f"grad_norm: {grad_norm.item():.4f}"
             )
             mem(f"end of epoch {ep}")
 
         if checkpoint_every and out_dir and (ep + 1) % checkpoint_every == 0:
-            bmnfld.states = train_data
-            bmnfld.seed = seed
-            bmnfld.n_train_rows = n_train_rows
-            save_all(bmnfld, out_dir, index_offset=model_indices.tolist(), sample_idx=sample_idx)
-            print(f"checkpoint: saved epoch {ep + 1} to {out_dir}", flush=True)
+            def _save():
+                bmnfld.states = train_data
+                bmnfld.seed = seed
+                bmnfld.n_train_rows = n_train_rows
+                save_all(bmnfld, out_dir, index_offset=model_indices.tolist(), sample_idx=sample_idx)
+            with_best_val_weights(_save)
+            print(
+                f"checkpoint: saved epoch {ep + 1} to {out_dir} "
+                f"(best-val weights from epoch with lowest mean val_recon={best_val_loss:.4f})",
+                flush=True,
+            )
 
     # ---------------------------------------------------------------- train/val metrics
+
+    # Training is done -- permanently reset to the best-mean-val-recon epoch's
+    # weights (not the final epoch's) before computing final metrics/returning,
+    # since the two can differ and best-val is what should end up on disk.
+    with torch.no_grad():
+        for w, best_w in zip(bmnfld.encoder.weights, best_encoder_weights):
+            w.copy_(best_w.to(device))
+        for w, best_w in zip(bmnfld.decoder.weights, best_decoder_weights):
+            w.copy_(best_w.to(device))
 
     val_dist, val_neighbor_idx = knn(
         val_data, k, chunk=knn_chunk, model_chunk=knn_model_chunk, device=device,
@@ -272,8 +370,8 @@ def train(
             v_nbr_idx = val_neighbor_idx[model_arange[:, :, 0], vs + torch.arange(v_x.shape[1], device=device)]
             v_neighbors = val_data[model_arange, v_nbr_idx]  # (n_models, b, k, d_model)
             v_z = bmnfld.encode(v_x)
-            v_z_neighbors = bmnfld.encode(
-                v_neighbors.reshape(n_models, -1, v_neighbors.shape[-1])
+            v_z_neighbors = chunked_encode(
+                bmnfld, v_neighbors.reshape(n_models, -1, v_neighbors.shape[-1]), knn_model_chunk
             ).reshape(n_models, v_x.shape[1], bmnfld.n_neighbors, bmnfld.latent_dim)
             v_ambient_dist = (v_neighbors - v_x[:, :, None]).norm(dim=-1)
             v_latent_dist = (v_z_neighbors - v_z[:, :, None]).norm(dim=-1)
@@ -309,7 +407,9 @@ def main():
                         "checkpointed to its own sample's directory with its own local numbering, so results "
                         "are identical to running each sample separately, just processed together on GPU")
     p.add_argument("--layers", nargs="*", default=None, help="defaults to every layer in sweep_dir")
-    p.add_argument("--network-dims", type=int, nargs="*", default=[512, 32])
+    p.add_argument("--network-dims", type=int, nargs="*", default=None,
+                   help="hidden/latent dims after d_model, e.g. 512 32 for [d_model, 512, 32] -- "
+                        "defaults to the config's own network_dims (see ModelConfig.network_dims)")
     p.add_argument("--k", type=int, default=32)
     p.add_argument("--knn-chunk", type=int, default=512)
     p.add_argument("--knn-model-chunk", type=int, default=8)
@@ -317,6 +417,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=96)
     p.add_argument("--lr", type=float, default=2e-3)
     p.add_argument("--lam-geom", type=float, default=0.1)
+    p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--val-frac", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-models-per-chunk", type=int, default=100,
@@ -334,15 +435,18 @@ def main():
                         "training (overwriting the previous periodic checkpoint), so a crash mid-training "
                         "still leaves usable weights on disk. 0 disables periodic checkpointing (only the "
                         "final checkpoint after each chunk completes is saved)")
-    p.add_argument("--backend", choices=["hetzner", "nfs"], default="hetzner",
-                   help="transport load_sweep_data pulls any not-yet-local sweep shard through -- 'hetzner' "
-                        "(default) via execute.remote_storage, 'nfs' via execute.node_relay's scratch_staging/ "
-                        "relay (e.g. when this run is training on ruapehu against sweep data relayed in from "
-                        "mauao via scripts/helper/sync_node_scratch.sh + node_relay, rather than data pushed "
-                        "to the Hetzner store). Must match how the sweep data being read was actually pushed.")
+    p.add_argument("--backend", choices=["hetzner", "nfs"], default="nfs",
+                   help="transport load_sweep_data pulls any not-yet-local sweep shard through -- 'nfs' "
+                        "(default) via execute.node_relay's NFS-staging relay (e.g. when this run is "
+                        "training on ruapehu against sweep data relayed in from mauao via "
+                        "scripts/helper/sync_node_scratch.sh + node_relay), 'hetzner' via "
+                        "execute.remote_storage (only relevant for older sweep data pushed there before "
+                        "this project moved to the NFS relay). Must match how the sweep data being read "
+                        "was actually pushed.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
+    network_dims = args.network_dims if args.network_dims is not None else cfg.network_dims
     sweep_dir = sweep_dir_for(cfg)
     print(f"sweep_dir: {sweep_dir}")
     full_layers = discover_layer_names(sweep_dir)
@@ -401,7 +505,7 @@ def main():
 
         bmnfld, metrics = train(
             chunk_data,
-            network_dims=args.network_dims,
+            network_dims=network_dims,
             k=args.k,
             knn_chunk=args.knn_chunk,
             knn_model_chunk=args.knn_model_chunk,
@@ -409,6 +513,7 @@ def main():
             batch_size=args.batch_size,
             lr=args.lr,
             lam_geom=args.lam_geom,
+            grad_clip=args.grad_clip,
             val_frac=args.val_frac,
             seed=args.seed,
             model_indices=chunk_local_index,

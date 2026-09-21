@@ -7,7 +7,9 @@ Where remote_storage.py goes over SFTP to a remote box (durable, dedup'd,
 but capped by Hetzner upload bandwidth), this module goes local-scratch ->
 NFS -> local-scratch, entirely through the filesystem every node already
 mounts. No content-addressing, no remote index, no SFTP -- just an rsync
-through `scratch_staging/` on NFS. Roughly 5-10x the throughput of the
+through /nfs-share/datasets/<user>/ (kept out of the repo tree under
+/nfs-share/pa511/... since it holds bulk relay data, not project files, and
+that tree has a tighter quota). Roughly 5-10x the throughput of the
 Hetzner leg (measured ~450 MB/s NFS-side vs. Hetzner's SFTP bottleneck),
 since it never leaves the local network.
 
@@ -32,7 +34,7 @@ import subprocess
 from concurrent.futures import Future, ThreadPoolExecutor
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STAGING_ROOT = os.path.join(PROJECT_ROOT, "scratch_staging")
+STAGING_ROOT = os.path.join("/nfs-share/datasets", os.environ.get("USER", "pa511"))
 
 
 def _rsync(src: str, dst: str) -> None:
@@ -89,7 +91,7 @@ def ensure_local(path: str, dest_dir: str | None = None, **_ignored) -> str:
     Mirrors remote_storage.ensure_local's signature/semantics (including
     treating `path` as project-relative for staging lookup, and reusing an
     already-local NFS copy before re-pulling onto `dest_dir`), but sources
-    from `scratch_staging/` instead of the Hetzner remote index.
+    from STAGING_ROOT instead of the Hetzner remote index.
     """
     virtual_path = os.path.relpath(path, PROJECT_ROOT) if os.path.isabs(path) else path
     nfs_path = os.path.join(PROJECT_ROOT, virtual_path)

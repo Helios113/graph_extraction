@@ -38,6 +38,6 @@ exec uv run python -m scripts.python.run_autoencoder_sampled_sweep \
     "${CONFIG}" \
     --sample-idx ${SAMPLE_INDICES} \
     --samples-per-chunk "${SAMPLES_PER_CHUNK}" \
-    --out-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/ae_sampled_sweep" \
+    --out-dir "onnx_models/${NAME}/ae_sampled_sweep" \
     --n 1000 --alpha ${ALPHA} --tau "${TAU}" --radius "${RADIUS}" \
     ${NOISE:+--noise ${NOISE}}

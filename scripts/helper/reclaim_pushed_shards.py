@@ -8,8 +8,8 @@ Run ON the node whose scratch you want reclaimed (ruapehu or mauao) --
 scans NFS for every layer's `.progress.json` under onnx_models/, and for
 each shard marked `pushed: true`, checks whether a local copy still exists
 under $NEW_JAC_SCRATCH. If so, verifies the shard's backing copy (Hetzner
-.ptr, or scratch_staging/ file) is actually present, then deletes the local
-file.
+.ptr, or a file under execute.node_relay.STAGING_ROOT) is actually present,
+then deletes the local file.
 
 Usage:
   uv run python -m scripts.helper.reclaim_pushed_shards [--dry-run]
@@ -48,7 +48,8 @@ def _hetzner_ptr_exists(virtual_path: str) -> bool:
 
 
 def _nfs_staged_exists(virtual_path: str) -> bool:
-    return os.path.exists(os.path.join(REPO_ROOT, "scratch_staging", virtual_path))
+    from execute.node_relay import STAGING_ROOT
+    return os.path.exists(os.path.join(STAGING_ROOT, virtual_path))
 
 
 def _find_progress_files() -> list[str]:

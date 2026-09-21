@@ -51,20 +51,21 @@ def n_samples_for(sweep_dir: str, layer: str) -> int:
 
 
 def _load_row_range(
-    layer_key: str, row_start: int, row_end: int, dataset_name: str, backend: Backend = "hetzner",
+    layer_key: str, row_start: int, row_end: int, dataset_name: str, backend: Backend = "nfs",
 ) -> np.ndarray:
     """Reads only rows [row_start, row_end) of `dataset_name` for `layer_key`,
     touching only the shards that actually overlap that range (pulling each
-    from local scratch first, then NFS, then remote -- see
-    execute.remote_storage.ensure_local) instead of load_shard_rows'
+    from local scratch first, then NFS staging -- see
+    execute.node_relay.ensure_local) instead of load_shard_rows'
     whole-layer read. Rows are contiguous across shards in shard_idx order,
     same as load_shard_rows produces.
 
     `backend`: must match whatever the writer that produced this layer used
-    (see execute.sharded_writer.ShardedLayerWriter.backend) -- "hetzner"
-    pulls from the SFTP store, "nfs" pulls from scratch_staging/ via
-    execute.node_relay. The caller must already be running on the node it
-    wants shards pulled onto."""
+    (see execute.sharded_writer.ShardedLayerWriter.backend) -- "nfs"
+    (default) pulls from NFS staging via execute.node_relay, "hetzner" pulls
+    from the SFTP store (only relevant for older layers pushed there before
+    this project moved to the NFS relay). The caller must already be
+    running on the node it wants shards pulled onto."""
     if backend == "hetzner":
         from execute.remote_storage import ensure_local
     elif backend == "nfs":
@@ -90,7 +91,7 @@ def _load_row_range(
     return out
 
 
-def load_sample_cloud(sweep_dir: str, layer: str, sample_idx: int, backend: Backend = "hetzner") -> torch.Tensor:
+def load_sample_cloud(sweep_dir: str, layer: str, sample_idx: int, backend: Backend = "nfs") -> torch.Tensor:
     """One sample's (seq, n_vocab, d_model) point cloud for `layer`, reading
     only the rows belonging to `sample_idx` (row order is (sample_idx, pos,
     vocab_idx)-ravelled, so that's one contiguous row range -- see
@@ -114,7 +115,7 @@ def load_sample_cloud(sweep_dir: str, layer: str, sample_idx: int, backend: Back
 
 
 def load_sweep_data(
-    sweep_dir: str, layers: list[str], sample_idx: int, backend: Backend = "hetzner",
+    sweep_dir: str, layers: list[str], sample_idx: int, backend: Backend = "nfs",
 ) -> torch.Tensor:
     """Stacks load_sample_cloud across `layers` into one (n_layers * seq,
     n_vocab, d_model) tensor -- one model per (layer, pos) pair, matching

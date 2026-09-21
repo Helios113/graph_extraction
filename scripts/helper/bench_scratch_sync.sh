@@ -82,7 +82,7 @@ set -euo pipefail
 cd ${REPO}
 NEW_JAC_SCRATCH="/local/scratch/\${USER}/new_jac"
 SRC_DIR="\${NEW_JAC_SCRATCH}/${SUBPATH}"
-STAGE_DIR="${REPO}/scratch_staging/${SUBPATH}"
+STAGE_DIR="/nfs-share/datasets/\${USER}/${SUBPATH}"
 
 echo "=== upload leg: \$(hostname) scratch -> NFS staging, ${SIZE_MB} MB ==="
 mkdir -p "\${SRC_DIR}"
@@ -118,7 +118,7 @@ cat > "${DOWNLOAD_SCRIPT}" <<EOF
 set -euo pipefail
 cd ${REPO}
 NEW_JAC_SCRATCH="/local/scratch/\${USER}/new_jac"
-STAGE_DIR="${REPO}/scratch_staging/${SUBPATH}"
+STAGE_DIR="/nfs-share/datasets/\${USER}/${SUBPATH}"
 DEST_DIR="\${NEW_JAC_SCRATCH}/${SUBPATH}"
 
 echo "=== download leg: NFS staging -> \$(hostname) scratch ==="

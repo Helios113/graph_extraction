@@ -72,6 +72,7 @@ class ModelConfig:
     jacobian_position: int | None = None
     random_init: bool = False
     batch_by_node: dict[str, int] = field(default_factory=dict)
+    network_dims: list[int] = field(default_factory=lambda: [512, 32])
 
     def batch_for_node(self, node: str | None = None) -> int:
         """The fixed ONNX batch dim to use on `node` (default: the current

@@ -26,8 +26,11 @@ N_SAMPLES="$(uv run python -c 'from autoencoder.data import n_samples_for, sweep
 SAMPLE_INDICES="$(seq 0 $((N_SAMPLES - 1)))"
 SAMPLES_PER_CHUNK="1"
 
-# Edit to override the default full-rank knn-k (cfg.d_model + 1).
-KNN_K=""
+# Dual PCA (eigh on the (knn-k, knn-k) Gram matrix) with knn-k=160 -- works
+# below cfg.d_model (unlike the default "full"/primal method, which requires
+# knn-k >= d_model). Edit/empty these to fall back to the full-rank default.
+KNN_K="160"
+BASIS_METHOD="dual"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, samples [${SAMPLE_INDICES}], samples-per-chunk ${SAMPLES_PER_CHUNK}, scratch ${NEW_JAC_SCRATCH}"
 
@@ -35,5 +38,6 @@ exec uv run python -m scripts.python.generate_tangent_bases \
     "${CONFIG}" \
     --sample-idx ${SAMPLE_INDICES} \
     --samples-per-chunk "${SAMPLES_PER_CHUNK}" \
-    --out-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/tangent_bases" \
-    ${KNN_K:+--knn-k ${KNN_K}}
+    --out-dir "onnx_models/${NAME}/tangent_bases" \
+    ${KNN_K:+--knn-k ${KNN_K}} \
+    ${BASIS_METHOD:+--basis-method ${BASIS_METHOD}}

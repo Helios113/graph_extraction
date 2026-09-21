@@ -26,15 +26,18 @@ N_SAMPLES="$(uv run python -c 'from autoencoder.data import n_samples_for, sweep
 SAMPLE_INDICES="$(seq 0 $((N_SAMPLES - 1)))"
 SAMPLES_PER_CHUNK="1"
 
-# Edit to change the tangent-space sampling ball radius.
-RADIUS="0.1"
+# Edit to change the tangent-space sampling ball radii -- one or more,
+# space-separated; each radius gets its own output h5 per sublayer
+# ({src}.{dst}.radius{r}.sample{idx}), sharing this run's already-loaded
+# tangent bases/context activations across radii.
+RADII="0.1"
 
-echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, samples [${SAMPLE_INDICES}], samples-per-chunk ${SAMPLES_PER_CHUNK}, radius ${RADIUS}, scratch ${NEW_JAC_SCRATCH}"
+echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, samples [${SAMPLE_INDICES}], samples-per-chunk ${SAMPLES_PER_CHUNK}, radii [${RADII}], scratch ${NEW_JAC_SCRATCH}"
 
 exec uv run python -m scripts.python.generate_tangent_sweep \
     "${CONFIG}" \
-    --tangent-bases-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/tangent_bases" \
+    --tangent-bases-dir "onnx_models/${NAME}/tangent_bases" \
     --sample-idx ${SAMPLE_INDICES} \
     --samples-per-chunk "${SAMPLES_PER_CHUNK}" \
-    --out-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/tangent_sweep" \
-    --n 1000 --radius "${RADIUS}"
+    --out-dir "onnx_models/${NAME}/tangent_sweep" \
+    --n 1000 --radius ${RADII}

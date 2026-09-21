@@ -134,14 +134,14 @@ class ShardedLayerWriter:
     Ignored if `no_push` is set (nothing is uploaded, so nothing to delete
     either way)."""
     project_root: str = "."
-    backend: Backend = "hetzner"
-    """Which transport uploads/pulls go through: "hetzner" (default, via
-    execute.remote_storage -- durable SFTP store, survives this cluster
-    disappearing) or "nfs" (via execute.node_relay -- direct scratch ->
-    NFS staging -> scratch relay between two nodes on this same cluster,
-    much faster but not a backup). Use "nfs" for a compute/storage split
-    within this cluster (e.g. compute on ruapehu, large scratch on mauao);
-    ignored if `pusher` is passed explicitly (its own backend wins)."""
+    backend: Backend = "nfs"
+    """Which transport uploads/pulls go through: "nfs" (default, via
+    execute.node_relay -- direct scratch -> NFS staging -> scratch relay
+    between two nodes on this cluster, e.g. compute on ruapehu, large
+    scratch on mauao) or "hetzner" (via execute.remote_storage -- durable
+    off-cluster SFTP store; not used by this project's own scripts anymore,
+    kept only as a fallback transport). Ignored if `pusher` is passed
+    explicitly (its own backend wins)."""
     pusher: object | None = None
     """Shared AsyncPusher (either backend's) to upload shards through.
     `pusher` is typically shared across every layer's writer in a run, so
@@ -436,7 +436,7 @@ def load_shard_rows(
     layer_key: str,
     dataset_names: list[str] | None = None,
     pull_dir: str | None | Literal[False] = None,
-    backend: Backend = "hetzner",
+    backend: Backend = "nfs",
 ) -> dict[str, np.ndarray]:
     """Loader-side helper: read a layer's manifest, `ensure_local` (pull from
     remote store, if not already local) every shard, and concatenate each
@@ -454,9 +454,10 @@ def load_shard_rows(
     behavior).
 
     `backend`: must match whatever the writer that produced this layer used
-    (see ShardedLayerWriter.backend) -- "hetzner" pulls from the SFTP store,
-    "nfs" pulls from scratch_staging/ via execute.node_relay. The caller
-    must already be running on the node it wants shards pulled onto."""
+    (see ShardedLayerWriter.backend) -- "nfs" (default) pulls from NFS
+    staging via execute.node_relay, "hetzner" pulls from the SFTP store
+    (not used by this project's own scripts anymore). The caller must
+    already be running on the node it wants shards pulled onto."""
     if backend == "hetzner":
         from execute.remote_storage import ensure_local
     elif backend == "nfs":

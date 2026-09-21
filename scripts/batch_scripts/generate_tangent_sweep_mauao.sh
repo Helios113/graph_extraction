@@ -18,7 +18,7 @@ CONFIG="${1:-configs/gpt2.toml}"
 NAME="$(basename "${CONFIG}" .toml)"
 
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
-TANGENT_BASES_DIR="${2:-${NEW_JAC_SCRATCH}/onnx_models/${NAME}/tangent_bases}"
+TANGENT_BASES_DIR="${2:-onnx_models/${NAME}/tangent_bases}"
 
 echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, tangent bases ${TANGENT_BASES_DIR}, scratch ${NEW_JAC_SCRATCH}"
 

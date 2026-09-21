@@ -6,28 +6,43 @@ scripts.python.run_autoencoder_sampled_sweep, which instead samples near a fitte
 autoencoder manifold. Unlike that script, this one has no dependency on a
 trained autoencoder.
 
-Mechanism (per sublayer, per position `pos`):
+--sample-idx takes one or more samples; --samples-per-chunk groups them
+purely for progress-reporting/organization (default 1), same as
+scripts.python.generate_tangent_sweep. Each sample's ambient cloud and
+context activations are its own (they depend on sample_idx), but the
+{src}.{dst} subgraph session (make_subgraph_map) is built once per sublayer
+and reused across every sample and tau, since it doesn't depend on either.
+
+--tau also takes one or more values: a (sample, sublayer)'s already-loaded
+ambient cloud and context activations are reused across all requested taus
+(only the noise-sampling step and the ONNX forward pass re-run per tau), and
+each tau gets its own output layer_key so runs at different taus can
+complete/resume/push independently, same as --alpha in
+scripts.python.run_autoencoder_sampled_sweep (and --radius in
+scripts.python.generate_tangent_sweep, this script's tangent-space analogue).
+
+Mechanism (per sublayer, per sample, per tau, per position `pos`):
   1. Anchor: draw n indices uniformly (with replacement) from src's real
      (n_vocab, d_model) activation cloud at position `pos` (same
      autoencoder.data.load_sample_cloud pull used to fit the manifold
      sampler, but consumed directly -- no autoencoder/fit_stats involved).
   2. Sample: x = anchor_point + N(0, tau^2 I) in ambient (d_model) space.
-  3. Context: base_seqs[--sample-idx] (the same fixed sequence used
-     elsewhere in this sweep family) is run once through
+  3. Context: base_seqs[sample_idx] (the same fixed sequence used elsewhere
+     in this sweep family) is run once per (sample, sublayer) through
      ensure_extra_outputs to get REAL src-activations at every position.
-     Cached per sublayer since it doesn't depend on the sample.
   4. Splice: each sampled point replaces position `pos`'s value in that
      real src tensor -- every other position keeps its real activation.
   5. Run the full (1, seq, d_model) spliced tensor through the {src}.{dst}
      subgraph (ensure_subgraphs) and read dst at position `pos`.
 
-Output: one h5 file per sublayer (see execute.sharded_writer.ShardedLayerWriter
+Output: one h5 file per (sublayer, sample, tau) --
+{src}.{dst}.tau{t}.sample{idx}.h5 (see execute.sharded_writer.ShardedLayerWriter
 and CLAUDE.md's per-sublayer resilience pattern), pushed as soon as that
-sublayer finishes. Each row holds the sampled src vector, the real dst
-vector, the position, and the anchor index (which real vocab-cloud point the
-noise was added to); multiplicity is always 1 (no ball-membership concept
-applies here) and is kept only for schema parity with run_sampled_sweep's
-h5 files.
+(sublayer, sample, tau) finishes. Each row holds the sampled src vector, the
+real dst vector, the position, and the anchor index (which real vocab-cloud
+point the noise was added to); multiplicity is always 1 (no ball-membership
+concept applies here) and is kept only for schema parity with
+run_sampled_sweep's h5 files.
 """
 
 import argparse
@@ -42,8 +57,8 @@ import torch
 from autoencoder.data import load_sample_cloud, sweep_dir_for
 from config import ModelConfig, load_config
 from construct.construct import ensure_base_model, ensure_extra_outputs, ensure_subgraphs
-from execute.remote_storage import AsyncPusher
-from execute.sharded_writer import ShardedLayerWriter, discover_layer_names
+from execute.remote_storage import AsyncPusher as HetznerAsyncPusher
+from execute.sharded_writer import Backend, ShardedLayerWriter, discover_layer_names
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -136,88 +151,114 @@ def ambient_sample(
     return cloud[anchor].astype(np.float32) + noise, anchor.astype(np.int64)
 
 
-def run_sublayer(
+def run_sample(
     cfg: ModelConfig,
     sweep_dir: str,
     src: str,
     dst: str,
     sample_idx: int,
     base_ids: np.ndarray,
+    map_fn,
     n: int,
-    tau: float,
+    taus: list[float],
     seed: int,
     out_dir: str,
     flush_every: int,
     no_push: bool,
-    pusher: AsyncPusher | None,
+    backend: Backend,
+    pusher: object | None,
 ) -> None:
+    """One (sample, sublayer)'s worth of work across every requested tau --
+    `map_fn` (the {src}.{dst} subgraph session) is built once per sublayer
+    by the caller and passed in, since it doesn't depend on sample_idx or
+    tau; only the ambient cloud/context activations below are sample-
+    specific and get reloaded per call."""
     seq = cfg.seq
     d_model = cfg.d_model
-    generator = np.random.default_rng(seed)
 
-    print(f"[{src}->{dst}] loading real ambient cloud for {src}", flush=True)
+    print(f"[{src}->{dst}] sample {sample_idx}: loading real ambient cloud for {src}", flush=True)
     cloud = load_sample_cloud(sweep_dir, src, sample_idx).numpy()  # (seq, n_vocab, d_model)
 
-    print(f"[{src}->{dst}] getting real context activations for sample_idx={sample_idx}", flush=True)
+    print(f"[{src}->{dst}] sample {sample_idx}: getting real context activations", flush=True)
     ctx = context_activations(cfg, src, base_ids)  # (seq, d_model), real values at every position
 
-    map_fn = make_subgraph_map(cfg, src, dst)
+    for tau in taus:
+        generator = np.random.default_rng(seed)
 
-    layer_key = os.path.join(out_dir, f"{src}.{dst}.sample{sample_idx}")
-    writer = ShardedLayerWriter(
-        layer_key=layer_key,
-        n_rows=seq * n,
-        schema={
-            "src_vec": ((d_model,), "float32"),
-            "dst_vec": ((d_model,), "float32"),
-            "pos": ((), "int64"),
-            "anchor": ((), "int64"),
-            "multiplicity": ((), "int64"),
-        },
-        shard_rows=max(seq * n, 1),
-        flush_every=flush_every,
-        no_push=no_push,
-        attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, tau=tau),
-        pusher=pusher,
-    )
-
-    row = writer.next_row
-    for pos in range(seq):
-        pts, anchor = ambient_sample(cloud[pos], n, tau, generator)  # (n, d_model), (n,)
-
-        spliced = np.broadcast_to(ctx, (n, seq, d_model)).copy()  # (n, seq, d_model)
-        spliced[:, pos] = pts
-        out = map_fn(spliced.astype(np.float32))  # (n, seq, d_model)
-        dst_vecs = np.ascontiguousarray(out[:, pos])  # (n, d_model)
-
-        writer.write_rows(
-            row, row + n,
-            src_vec=pts, dst_vec=dst_vecs,
-            pos=np.full(n, pos, dtype=np.int64),
-            anchor=anchor, multiplicity=np.ones(n, dtype=np.int64),
+        layer_key = os.path.join(out_dir, f"{src}.{dst}.tau{tau:g}.sample{sample_idx}")
+        writer = ShardedLayerWriter(
+            layer_key=layer_key,
+            n_rows=seq * n,
+            schema={
+                "src_vec": ((d_model,), "float32"),
+                "dst_vec": ((d_model,), "float32"),
+                "pos": ((), "int64"),
+                "anchor": ((), "int64"),
+                "multiplicity": ((), "int64"),
+            },
+            shard_rows=max(seq * n, 1),
+            flush_every=flush_every,
+            no_push=no_push,
+            backend=backend,
+            attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, tau=tau),
+            pusher=pusher,
         )
-        row += n
-        print(f"[{src}->{dst}] pos={pos}: sampled {n} ambient points", flush=True)
 
-    writer.close()
-    print(f"[{src}->{dst}] done -> {layer_key}", flush=True)
+        row = writer.next_row
+        for pos in range(seq):
+            pts, anchor = ambient_sample(cloud[pos], n, tau, generator)  # (n, d_model), (n,)
+
+            spliced = np.broadcast_to(ctx, (n, seq, d_model)).copy()  # (n, seq, d_model)
+            spliced[:, pos] = pts
+            out = map_fn(spliced.astype(np.float32))  # (n, seq, d_model)
+            dst_vecs = np.ascontiguousarray(out[:, pos])  # (n, d_model)
+
+            writer.write_rows(
+                row, row + n,
+                src_vec=pts, dst_vec=dst_vecs,
+                pos=np.full(n, pos, dtype=np.int64),
+                anchor=anchor, multiplicity=np.ones(n, dtype=np.int64),
+            )
+            row += n
+            print(f"[{src}->{dst}] sample {sample_idx} tau={tau:g} pos={pos}: sampled {n} ambient points",
+                  flush=True)
+
+        writer.close()
+        print(f"[{src}->{dst}] sample {sample_idx} tau={tau:g} done -> {layer_key}", flush=True)
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("config", type=str, help="Path to a toml ModelConfig")
-    p.add_argument("--sample-idx", type=int, default=0, help="which base sequence's real activations to anchor/splice into")
+    p.add_argument("--sample-idx", type=int, nargs="+", default=[0],
+                   help="one or more base sequences' real activations to anchor/splice into")
+    p.add_argument("--samples-per-chunk", type=int, default=1,
+                   help="how many samples to process per progress-reporting group -- purely an "
+                        "overhead/organization knob, same as generate_tangent_sweep.py's flag: each "
+                        "sample's ambient-cloud/context-activation loading is always independent, so this "
+                        "never changes what gets computed, only how the run is grouped/logged")
     p.add_argument("--layers", nargs="*", default=None,
                    help="default: every layer in sweep_dir")
     p.add_argument("--sublayers", nargs="*", default=None,
                    help="only run these src.dst sublayers (default: every cfg.sublayers entry whose input is in --layers)")
     p.add_argument("--n", type=int, default=1000, help="samples per (sublayer, position)")
-    p.add_argument("--tau", type=float, default=1.0, help="isotropic Gaussian noise stddev added to each anchor point")
+    p.add_argument("--tau", type=float, nargs="+", default=[1.0],
+                   help="one or more isotropic Gaussian noise stddevs added to each anchor point -- each "
+                        "gets its own output layer_key ({src}.{dst}.tau{t}.sample{idx}), sharing this "
+                        "(sample, sublayer)'s already-loaded ambient cloud/context activations across taus "
+                        "instead of reloading them per tau")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--flush-every", type=int, default=10)
     p.add_argument("--no-push", action="store_true")
     p.add_argument("--upload-workers", type=int, default=4)
+    p.add_argument("--backend", choices=["hetzner", "nfs"], default="nfs",
+                   help="transport ShardedLayerWriter pushes each finished sublayer's shards through -- "
+                        "'nfs' (default) via execute.node_relay's NFS-staging relay (e.g. when this run's "
+                        "compute node isn't where the data should durably land, and a later step relays "
+                        "it in via scripts/helper/sync_node_scratch.sh), 'hetzner' via "
+                        "execute.remote_storage (not used by this project's own launchers anymore). "
+                        "Ignored if --no-push is also set.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -225,25 +266,40 @@ def main():
     layers = args.layers or discover_layer_names(sweep_dir)
     print(f"layers ({len(layers)}): {layers}", flush=True)
 
-    base_ids = load_base_seq(sweep_dir, args.sample_idx)
-
     sublayers = [(s.input, s.output) for s in cfg.sublayers if s.input in layers]
     if args.sublayers is not None:
         wanted = set(args.sublayers)
         sublayers = [(src, dst) for src, dst in sublayers if f"{src}.{dst}" in wanted]
     print(f"{len(sublayers)} sublayer(s) to run: {sublayers}", flush=True)
 
-    pusher = None if args.no_push else AsyncPusher(max_workers=args.upload_workers)
+    pusher_cls = HetznerAsyncPusher
+    if args.backend == "nfs":
+        from execute.node_relay import AsyncPusher as NfsAsyncPusher
+        pusher_cls = NfsAsyncPusher
+    pusher = None if args.no_push else pusher_cls(max_workers=args.upload_workers)
+
+    groups = [
+        args.sample_idx[i:i + args.samples_per_chunk]
+        for i in range(0, len(args.sample_idx), args.samples_per_chunk)
+    ]
 
     for src, dst in sublayers:
-        t0 = time.time()
-        run_sublayer(
-            cfg, sweep_dir, src, dst, args.sample_idx, base_ids,
-            n=args.n, tau=args.tau, seed=args.seed,
-            out_dir=args.out_dir, flush_every=args.flush_every,
-            no_push=args.no_push, pusher=pusher,
-        )
-        print(f"[{src}->{dst}] took {time.time() - t0:.1f}s", flush=True)
+        # map_fn (the {src}.{dst} subgraph session) doesn't depend on sample_idx or
+        # tau, so it's built once per sublayer and reused across every sample/tau below.
+        map_fn = make_subgraph_map(cfg, src, dst)
+
+        for group in groups:
+            print(f"\n=== [{src}->{dst}] samples {group} ===", flush=True)
+            for sample_idx in group:
+                t0 = time.time()
+                base_ids = load_base_seq(sweep_dir, sample_idx)
+                run_sample(
+                    cfg, sweep_dir, src, dst, sample_idx, base_ids, map_fn,
+                    n=args.n, taus=args.tau, seed=args.seed,
+                    out_dir=args.out_dir, flush_every=args.flush_every,
+                    no_push=args.no_push, backend=args.backend, pusher=pusher,
+                )
+                print(f"[{src}->{dst}] sample {sample_idx} took {time.time() - t0:.1f}s", flush=True)
 
 
 if __name__ == "__main__":

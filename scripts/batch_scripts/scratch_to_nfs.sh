@@ -31,7 +31,7 @@ mkdir -p logs
 SUBPATH="${1:?Usage: sbatch scratch_to_nfs.sh <subpath under \$NEW_JAC_SCRATCH>}"
 
 export NEW_JAC_SCRATCH="/local/scratch/${USER}/new_jac"
-STAGING_ROOT="/nfs-share/pa511/code_bases/new_jac/scratch_staging"
+STAGING_ROOT="/nfs-share/datasets/${USER}"
 
 SRC="${NEW_JAC_SCRATCH}/${SUBPATH}"
 DEST="${STAGING_ROOT}/${SUBPATH}"

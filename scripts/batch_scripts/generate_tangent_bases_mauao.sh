@@ -23,4 +23,6 @@ echo "Job ${SLURM_JOB_ID} running on $(hostname), config ${CONFIG}, scratch ${NE
 
 exec uv run python -m scripts.python.generate_tangent_bases \
     "${CONFIG}" \
-    --out-dir "${NEW_JAC_SCRATCH}/onnx_models/${NAME}/tangent_bases"
+    --out-dir "onnx_models/${NAME}/tangent_bases" \
+    --knn-k 160 \
+    --basis-method dual

@@ -4,7 +4,7 @@
 # nodes -- NFS (/nfs-share) is the only filesystem every node mounts -- so
 # this submits two dependent sbatch jobs:
 #   1. scratch_to_nfs.sh on --from, staging SUBPATH under
-#      /nfs-share/pa511/code_bases/new_jac/scratch_staging/
+#      /nfs-share/datasets/$USER/
 #   2. nfs_to_scratch.sh on --to, gated on job 1 succeeding
 #      (--dependency=afterok), pulling it into --to's local scratch
 #
