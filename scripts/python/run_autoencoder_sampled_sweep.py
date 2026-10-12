@@ -397,13 +397,19 @@ def main():
                         "of local ambient spacing (matching plot_autoencoder_sample_diagnostics.py's 0.5x/1x "
                         "bands) -- each gets its own {src}.{dst}.noise{level}.h5. Default: none written.")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--jacobian-chunk", type=int, default=256,
-                   help="point-dim chunk size for the volume-reweighting Jacobian pass in sampling.batched_sample")
-    p.add_argument("--jacobian-model-chunk", type=int, default=8,
+    p.add_argument("--jacobian-chunk", type=int, default=64,
+                   help="point-dim chunk size for the volume-reweighting Jacobian pass in sampling.batched_sample "
+                        "(default lowered from 256: at gpt2's d_model=768/latent_dim=128 -- larger than the "
+                        "configs model_chunk=8/chunk=256 were originally tuned against -- that combination OOM'd "
+                        "trying to allocate 48.83GiB on a 44GiB GPU at n_models=100; scale back up for configs "
+                        "with a smaller decoder)")
+    p.add_argument("--jacobian-model-chunk", type=int, default=1,
                    help="model-dim chunk size for the same Jacobian pass -- forward-mode AD's memory scales with "
-                        "points x models processed together, so a large n_models (many sublayer/position models "
-                        "loaded at once) needs this bounded too, not just --jacobian-chunk (default: all models "
-                        "at once, which OOM'd at n_models=104 with the old unchunked jacobian())")
+                        "points x models x latent_dim tangent directions processed together, so a large n_models "
+                        "(many sublayer/position models loaded at once) needs this bounded too, not just "
+                        "--jacobian-chunk (default lowered from 8 to 1 for the same gpt2 OOM as --jacobian-chunk "
+                        "above -- unchunked (all models at once) OOM'd at n_models=104 with the old unchunked "
+                        "jacobian())")
     p.add_argument("--support-chunk", type=int, default=2048,
                    help="point-dim chunk size for the support-density cdist pass in sampling.batched_sample")
     p.add_argument("--support-model-chunk", type=int, default=4,

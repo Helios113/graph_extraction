@@ -171,7 +171,10 @@ def batched_log_volume(
     points)."""
     out: list[Tensor] = []
     for s in range(0, z.shape[1], chunk):
-        J = model.jacobian(z[:, s : s + chunk], chunk=chunk, model_chunk=model_chunk)  # (n_models, b, D, m)
+        # .contiguous(): see batched_autoencoder.jacobian's docstring/comment -- a
+        # non-contiguous slice into vmap(vmap(jacfwd(...))) can blow its internal
+        # allocation up to a size tied to z's full (unsliced) extent.
+        J = model.jacobian(z[:, s : s + chunk].contiguous(), chunk=chunk, model_chunk=model_chunk)  # (n_models, b, D, m)
         out.append(0.5 * torch.linalg.slogdet(J.transpose(-1, -2) @ J)[1])
     return torch.cat(out, dim=1)
 

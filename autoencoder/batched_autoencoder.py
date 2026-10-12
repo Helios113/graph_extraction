@@ -274,10 +274,16 @@ class batched_autoencoder(nn.Module):
         d_model = self.decoder.network_dims[-1]
         out = torch.empty(n_models, z.shape[1], d_model, self.latent_dim, device=z.device)
         for m in range(0, n_models, model_chunk):
-            m_weights = [w[m:m + model_chunk] for w in weights]
+            # .contiguous(): a non-contiguous slice here (whenever model_chunk/chunk
+            # don't cover the full tensor) makes vmap(vmap(jacfwd(...))) blow up its
+            # internal allocation to a size tied to the parent tensor's full storage
+            # extent instead of the slice's logical shape -- e.g. a chunk=64 slice of
+            # an n_c=8000-point tensor requested 48.83GiB (extrapolated from n_c, not
+            # chunk) and OOM'd, where the same shape freshly allocated took <1GiB.
+            m_weights = [w[m:m + model_chunk].contiguous() for w in weights]
             for s in range(0, z.shape[1], chunk):
                 out[m:m + model_chunk, s:s + chunk] = f(
-                    m_weights, z[m:m + model_chunk, s:s + chunk], self.decoder.activation,
+                    m_weights, z[m:m + model_chunk, s:s + chunk].contiguous(), self.decoder.activation,
                 )
         return out * self.scale[..., None]
 

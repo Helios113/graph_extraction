@@ -7,15 +7,19 @@ output), computes the pairwise distance ratio
 
     g = ||f(x) - f(y)|| / ||x - y||
 
-over a random subsample of point pairs (a local estimate of the map's
-co-Lipschitz / lower Lipschitz constant -- see the derivation in
-playground.ipynb), then:
+over a random subsample of point pairs (`--n-pairs`, default 200k -- a local
+estimate of the map's co-Lipschitz / lower Lipschitz constant, see the
+derivation in playground.ipynb; true exhaustive all-C(vocab,2)-pairs
+pairing was measured impractically slow at tiny_llama/gpt2 vocab sizes, so
+this raises random-pair coverage instead), then:
 
   1. runs the Expected Quantile Discrepancy (Bader, Yan & Zhang 2018) sweep
      over candidate tail sizes to auto-select an exceedance threshold u,
   2. fits a GPD to the exceedances at that threshold,
-  3. saves the raw ratio scatter (subsampled) plus the EQD sweep curve and
-     GPD fit parameters to one small h5 file on NFS.
+  3. saves a `--n-pairs-save`-sized random subsample of the ratio scatter
+     (kept much smaller than --n-pairs so output size doesn't scale with
+     fit quality) plus the EQD sweep curve and GPD fit parameters to one
+     small h5 file on NFS.
 
 This is a CPU-only, post-hoc analysis step meant to run on the same node the
 perturbed sweep itself ran on (mauao, via srun -- see
@@ -23,10 +27,10 @@ scripts/batch_scripts/lipschitz_ratio_eqd_fit_mauao.sh), reading shards
 straight off that node's local scratch (`$NEW_JAC_SCRATCH`). No NFS/Hetzner
 pull -- shards not found on local scratch are treated as missing (the sweep
 should be re-run or relayed via scripts/helper/sync_node_scratch.sh first;
-see CLAUDE.md's Hetzner ban). Its own output is small (one scatter of
-`--n-pairs` ratios plus a handful of scalars per (sample, pos, layer-pair))
-and is written directly under `--out-dir` on NFS as plain h5 files, not
-through `ShardedLayerWriter`.
+see CLAUDE.md's Hetzner ban). Its own output is small (one `--n-pairs-save`
+-sized ratio scatter plus a handful of scalars per (sample, pos,
+layer-pair)) and is written directly under `--out-dir` on NFS as plain h5
+files, not through `ShardedLayerWriter`.
 
 Usage (on mauao, via srun -- see scripts/batch_scripts/lipschitz_ratio_eqd_fit_mauao.sh):
     uv run python -m scripts.analysis.lipschitz_ratio_eqd_fit \\
@@ -104,7 +108,12 @@ def load_row_range(
 def eqd_statistic(exceedances: np.ndarray) -> float:
     """Expected Quantile Discrepancy (Bader, Yan & Zhang 2018): weighted L1
     distance between empirical and fitted-GPD exceedance quantiles, weight
-    w_i = min(p_i, 1 - p_i) so tail quantiles count most. Lower is better."""
+    w_i = min(p_i, 1 - p_i) so tail quantiles count most. Lower is better.
+
+    Uses the exact scipy MLE fit -- this is the slow, precise version, called
+    once per position on the EQD-selected threshold's exceedances (see
+    run_sample), not in the O(n_tail_values) search loop -- see
+    gpd_moments_fit / eqd_statistic_moments for that."""
     k = exceedances.size
     exc_sorted = np.sort(exceedances)
     xi_k, _loc_k, sigma_k = genpareto.fit(exc_sorted, floc=0)
@@ -117,12 +126,56 @@ def eqd_statistic(exceedances: np.ndarray) -> float:
     return float(np.sum(weights * np.abs(exc_sorted - theoretical_q)) / k)
 
 
+def gpd_moments_fit(mean: np.ndarray, var: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Closed-form method-of-moments GPD(xi, sigma) estimator (loc=0), from
+    matching the GPD's theoretical mean sigma/(1-xi) and variance
+    sigma^2/((1-xi)^2*(1-2xi)) to the sample mean/variance and solving the
+    2x2 system:
+
+        xi    = (mean^2/var - 1) / 2
+        sigma = mean * (mean^2/var + 1) / 2
+
+    Fully vectorized (mean/var are arrays, one entry per candidate) -- used
+    only to rank candidate thresholds in the EQD sweep, not as the final
+    reported fit (see eqd_statistic / fit_gpd_at_threshold for the exact
+    scipy MLE used once the threshold is chosen). Standard starting-value
+    estimator for GPD MLE (e.g. in the ismev/extRemes R packages); accurate
+    enough to rank candidates despite being less precise than MLE -- see
+    module-level notes on the EQD speedup this enables."""
+    ratio = np.where(var > 0, mean**2 / np.where(var > 0, var, 1.0), np.nan)
+    xi = 0.5 * (ratio - 1)
+    sigma = 0.5 * mean * (ratio + 1)
+    return xi, sigma
+
+
+def gpd_ppf_closed_form(p: np.ndarray, xi: float, sigma: float) -> np.ndarray:
+    """Closed-form GPD(xi, sigma, loc=0) quantile function
+    ppf(p) = sigma/xi * ((1-p)^(-xi) - 1), xi -> 0 limit -sigma*log(1-p) --
+    numerically identical to scipy.stats.genpareto.ppf but avoids its
+    generic per-call dispatch overhead in the sweep's hot loop."""
+    if abs(xi) < 1e-10:
+        return -sigma * np.log(1 - p)
+    return (sigma / xi) * ((1 - p) ** (-xi) - 1)
+
+
+def eqd_statistic_moments(exc_sorted: np.ndarray, xi: float, sigma: float) -> float:
+    """eqd_statistic's discrepancy formula, but taking an already-fitted
+    (xi, sigma) (from gpd_moments_fit) instead of calling genpareto.fit
+    itself -- the piece of eqd_statistic that's still O(k) per candidate
+    even after removing the optimizer call."""
+    k = exc_sorted.size
+    if not (sigma > 0) or not np.isfinite(xi):
+        return np.inf
+    ranks = np.arange(1, k + 1)
+    p = ranks / (k + 1)
+    theoretical_q = gpd_ppf_closed_form(p, xi, sigma)
+    weights = np.minimum(p, 1 - p)
+    return float(np.sum(weights * np.abs(exc_sorted - theoretical_q)) / k)
+
+
 def select_eqd_threshold(
     g_sorted: np.ndarray, n_tail_min: int, n_tail_max: int, n_tail_step: int,
 ) -> dict:
-    """Sweeps candidate tail sizes n_tail in [n_tail_min, n_tail_max) and
-    picks the one minimizing eqd_statistic on the n_tail smallest values of
-    g_sorted. Returns the sweep arrays plus the selected threshold/fit."""
     n_tail_max = min(n_tail_max, g_sorted.size - 1)
     n_tail_values = np.arange(n_tail_min, n_tail_max, n_tail_step)
     if n_tail_values.size == 0:
@@ -130,11 +183,25 @@ def select_eqd_threshold(
             f"empty n_tail sweep range [{n_tail_min}, {n_tail_max}) for {g_sorted.size} points"
         )
 
+    # Cumulative sums give every candidate's prefix mean/var in one pass,
+    # instead of re-summing g_sorted[:n_tail] from scratch per candidate.
+    # exceedances = u_n - g_sorted[:n_tail] is a per-candidate constant
+    # shift of g_sorted[:n_tail], so var(exceedances) == var(g_sorted[:n_tail]).
+    csum = np.cumsum(g_sorted)
+    csum2 = np.cumsum(g_sorted**2)
+    n = n_tail_values.astype(np.float64)
+    prefix_mean = csum[n_tail_values - 1] / n
+    prefix_var = csum2[n_tail_values - 1] / n - prefix_mean**2
+    u = g_sorted[n_tail_values]
+    exc_mean = u - prefix_mean  # mean(u_n - g_sorted[:n_tail])
+
+    xi_sweep, sigma_sweep = gpd_moments_fit(exc_mean, prefix_var)
+
     eqd_sweep = np.full(n_tail_values.shape, np.nan)
     for i, n_tail in enumerate(n_tail_values):
         u_n = g_sorted[n_tail]
-        exc_n = u_n - g_sorted[:n_tail]
-        eqd_sweep[i] = eqd_statistic(exc_n)
+        exc_n = np.sort(u_n - g_sorted[:n_tail])
+        eqd_sweep[i] = eqd_statistic_moments(exc_n, xi_sweep[i], sigma_sweep[i])
 
     best_idx = int(np.argmin(eqd_sweep))
     best_n_tail = int(n_tail_values[best_idx])
@@ -205,6 +272,7 @@ def run_sample(
     seq_len: int,
     vocab_size: int,
     n_pairs: int,
+    n_pairs_save: int,
     n_tail_min: int,
     n_tail_max: int,
     n_tail_step: int,
@@ -214,7 +282,13 @@ def run_sample(
     """grid_in, grid_out: (seq * vocab_size, d_model) vocab-sweep rows for
     this sample only (one sample's contiguous row range), reshaped here to
     (seq, vocab_size, d_model). Writes one h5 group per position under
-    out_path."""
+    out_path.
+
+    `n_pairs` random pairs drive the EQD/GPD fit (want this large -- default
+    200k -- so the tail the fit sees is densely populated); only a
+    `n_pairs_save`-sized random subsample of that same array is written to
+    disk, so saved scatter size doesn't scale with fit quality (see
+    --n-pairs/--n-pairs-save help text)."""
     grid_in = grid_in.reshape(seq_len, vocab_size, -1)
     grid_out = grid_out.reshape(seq_len, vocab_size, -1)
     rng = np.random.default_rng(seed + sample_idx)
@@ -225,18 +299,26 @@ def run_sample(
         h5f.attrs["sublayer_output"] = sublayer_output
         h5f.attrs["sample_idx"] = sample_idx
         h5f.attrs["n_pairs"] = n_pairs
+        h5f.attrs["n_pairs_save"] = n_pairs_save
 
-        for pos in range(seq_len):
+        for pos in tqdm.tqdm(range(seq_len), desc=f"sample {sample_idx} positions", leave=False):
             input_dist, output_dist, ratio = compute_lipschitz_ratios(
                 grid_in[pos], grid_out[pos], n_pairs=n_pairs, rng=rng,
             )
             g_sorted = np.sort(ratio)
 
+            # Subsample only what's written to disk -- the fit above already
+            # ran on the full n_pairs array. min() guards n_pairs_save >
+            # actual pair count (e.g. a small vocab where n_pairs was
+            # clipped in compute_lipschitz_ratios).
+            n_save = min(n_pairs_save, ratio.size)
+            save_idx = rng.choice(ratio.size, size=n_save, replace=False)
+
             grp = h5f.create_group(f"pos_{pos:04d}")
             grp.attrs["pos"] = pos
-            grp.create_dataset("input_dist", data=input_dist.astype(np.float32))
-            grp.create_dataset("output_dist", data=output_dist.astype(np.float32))
-            grp.create_dataset("ratio", data=ratio.astype(np.float32))
+            grp.create_dataset("input_dist", data=input_dist[save_idx].astype(np.float32))
+            grp.create_dataset("output_dist", data=output_dist[save_idx].astype(np.float32))
+            grp.create_dataset("ratio", data=ratio[save_idx].astype(np.float32))
 
             try:
                 eqd_result = select_eqd_threshold(g_sorted, n_tail_min, n_tail_max, n_tail_step)
@@ -292,9 +374,23 @@ def main() -> None:
     parser.add_argument(
         "--n-pairs",
         type=int,
+        default=200_000,
+        help="Number of random point pairs to sample per (sample, pos) vocab-sweep cloud, "
+        "for the threshold/GPD fit. True exhaustive pairing (all C(vocab_size, 2) pairs) "
+        "was measured impractically slow at these vocab sizes (tiny_llama/gpt2: "
+        "~500M-1.3B pairs/position) -- this raises random-pair coverage well past "
+        "--n-tail-max instead, so the tail the EQD/GPD fit sees is densely populated "
+        "without the O(vocab^2) blowup. See --n-pairs-save for what's actually written "
+        "to disk (kept much smaller so output size doesn't scale with fit quality).",
+    )
+    parser.add_argument(
+        "--n-pairs-save",
+        type=int,
         default=10_000,
-        help="Number of random point pairs to sample per (sample, pos) vocab-sweep "
-        "cloud, for both the saved scatter and the threshold/GPD fit",
+        help="Number of the --n-pairs ratios (randomly subsampled) to write to the output "
+        "h5's scatter datasets (input_dist/output_dist/ratio) -- kept much smaller than "
+        "--n-pairs so output size doesn't scale with fit quality (e.g. 200k --n-pairs x 44 "
+        "sublayer pairs x 64 samples x 4 positions would otherwise be tens of GB on NFS).",
     )
     parser.add_argument(
         "--n-tail-min", type=int, default=20, help="Smallest n_tail in the EQD sweep",
@@ -366,6 +462,7 @@ def main() -> None:
                 seq_len=seq_len,
                 vocab_size=vocab_size,
                 n_pairs=args.n_pairs,
+                n_pairs_save=args.n_pairs_save,
                 n_tail_min=args.n_tail_min,
                 n_tail_max=args.n_tail_max,
                 n_tail_step=args.n_tail_step,

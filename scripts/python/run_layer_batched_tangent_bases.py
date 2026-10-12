@@ -322,6 +322,9 @@ def main():
 
         if args.skip_reclaim:
             print(f"batch {i + 1}/{len(batches)}: --skip-reclaim, leaving input data on {args.compute_node}", flush=True)
+        elif args.compute_node == args.storage_node:
+            print(f"compute_node == storage_node ({args.compute_node}), skipping input-data reclaim "
+                  "(it's storage_node's only copy, not a relayed-in duplicate)", flush=True)
         else:
             print(f"reclaiming batch {i + 1}/{len(batches)}'s input data on {args.compute_node} ...", flush=True)
             for sp in layer_subpaths:

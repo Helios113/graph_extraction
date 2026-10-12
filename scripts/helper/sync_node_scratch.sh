@@ -59,8 +59,8 @@ done
 [ -n "${FROM}" ] && [ -n "${TO}" ] && [ -n "${SUBPATH}" ] || usage
 
 if [ "${FROM}" = "${TO}" ]; then
-    echo "error: --from and --to are both ${FROM} -- nothing to relay" >&2
-    exit 1
+    echo "--from and --to are both ${FROM} -- already on the same node's scratch, nothing to relay"
+    exit 0
 fi
 
 # Each node's own dedicated partition, used when --partition isn't given.

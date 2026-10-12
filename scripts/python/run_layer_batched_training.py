@@ -24,6 +24,16 @@ Layer sizing is measured directly on mauao (the manifests on NFS carry row
 counts/schema but not on-disk byte sizes -- see _layer_sizes_gb), via one
 short sbatch `du` job.
 
+--compute-node/--storage-node can also both be "mauao" (training runs on
+the same a40 node the sweep data already lives on) -- relay-in already
+no-ops in this case (present_sizes_gb already matches storage_node's size,
+since it's the same node), and relay-out/reclaim are explicitly skipped
+(see the compute_node == storage_node checks below): relaying checkpoints
+to yourself is pointless work, and reclaiming "relayed-in" input that's
+actually storage_node's only copy would delete real data. `sync_node_scratch.sh`
+itself refuses a --from/--to on the same node, which is what motivated
+these guards.
+
 Idempotent to re-running after a crash: a batch whose checkpoints are
 already complete on mauao (per autoencoder.batched_autoencoder.load_batched's
 expected_indices check) is skipped entirely, so a driver restart resumes
@@ -366,14 +376,21 @@ def main():
         if not _job_succeeded(train_job):
             raise RuntimeError(f"batch {i + 1}: training job {train_job} did not complete -- see logs/train_batched_manifold_ruapehu_{train_job}.out")
 
-        print(f"relaying checkpoints {args.compute_node} -> {args.storage_node} ...", flush=True)
-        relay_out_job = _relay(args.compute_node, args.storage_node, ckpt_root_subpath, time_limit=args.relay_time_limit)
-        _wait_for_jobs([relay_out_job])
-        if not _job_succeeded(relay_out_job):
-            raise RuntimeError(f"batch {i + 1}: relay-out job {relay_out_job} did not complete -- see logs/nfs_to_scratch_<job>.out")
+        if args.compute_node == args.storage_node:
+            print(f"compute_node == storage_node ({args.compute_node}), skipping checkpoint relay-out "
+                  "(already on the right node)", flush=True)
+        else:
+            print(f"relaying checkpoints {args.compute_node} -> {args.storage_node} ...", flush=True)
+            relay_out_job = _relay(args.compute_node, args.storage_node, ckpt_root_subpath, time_limit=args.relay_time_limit)
+            _wait_for_jobs([relay_out_job])
+            if not _job_succeeded(relay_out_job):
+                raise RuntimeError(f"batch {i + 1}: relay-out job {relay_out_job} did not complete -- see logs/nfs_to_scratch_<job>.out")
 
         if args.skip_reclaim:
             print(f"batch {i + 1}/{len(batches)}: --skip-reclaim, leaving input data on {args.compute_node}", flush=True)
+        elif args.compute_node == args.storage_node:
+            print(f"compute_node == storage_node ({args.compute_node}), skipping input-data reclaim "
+                  "(it's storage_node's only copy, not a relayed-in duplicate)", flush=True)
         else:
             print(f"reclaiming batch {i + 1}/{len(batches)}'s input data on {args.compute_node} ...", flush=True)
             for sp in layer_subpaths:
