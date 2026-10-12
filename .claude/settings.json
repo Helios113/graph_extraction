@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Edit(/nfs-share/pa511/code_bases/new_jac/analyze/**)",
-      "Write(/nfs-share/pa511/code_bases/new_jac/analyze/**)"
+      "Edit(/nfs-share/pa511/code_bases/new_jac/construct//**)",
+      "Write(/nfs-share/pa511/code_bases/new_jac/construct//**)"
     ],
     "deny": [
       "Edit(*)",
@@ -10,5 +10,3 @@
     ]
   }
 }
-
-{}
