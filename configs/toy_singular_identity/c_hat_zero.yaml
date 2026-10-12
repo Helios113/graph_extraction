@@ -1,0 +1,14 @@
+# c_hat -> 0 for f(x)_0 = x_0^2. With w = dx_0^2 / ||x-y||^2,
+#   g^2 = w (x_0 + y_0)^2 + (1 - w)  ~  (x_0 + y_0)^2 + (|dr| / dx_0)^2,
+# so g ~ 0 needs BOTH:
+#   1. fold term: pairs mirrored across x_0 = 0 (x_0 ~ -y_0) -> sample both
+#      sides (near or far); one_side can never get below 2 * min |x_0|.
+#   2. alignment floor: |dr| ~ rest_scale * sqrt(2 (dim-1) / 3) ~ 16 * rest_scale
+#      must be << dx_0 = 2|x_0| of the mirrored pairs, i.e.
+#      c_hat ~ 16 * rest_scale / (2 |x_0|)  -> far ~ 8 s, near (|x_0| <= 0.1) ~ 80 s.
+# Measured at rest_scale 1e-5: far c_hat ~ 8e-5 (xi ~ -1, the fold's own tail
+# shape: |x_0 + y_0| has flat density at 0), near ~ 7e-4 (still floor-limited).
+# Distance FROM the singularity helps: longer mirrored pairs dilute the floor.
+rest_scale: 0.00001
+regimes: [near, far]
+out: figures/toy_singular_identity/c_hat_zero.png

@@ -1,0 +1,6 @@
+# Thin cloud (rest_scale 0.01): e_0 carries a real share of each pair's
+# distance, so the three regimes separate -- far (pairs straddling the fold,
+# x_0 ~ -y_0) gets the lowest c_hat, near stays high (pairs barely move along e_0).
+rest_scale: 0.01
+one_side_range: [-1.0, -0.1]     # true K_L = 0.2
+out: figures/toy_singular_identity/thin.png

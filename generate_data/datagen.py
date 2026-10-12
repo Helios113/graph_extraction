@@ -231,8 +231,13 @@ def knn_gpu(
         # Convert squared distances to Euclidean distances
         if out_dist is not None:
             out_dist[q_start:q_end] = best_dist.sqrt()
-        out_idx[q_start:q_end] = best_idx.to(torch.int32).to("cpu", non_blocking=True)
+        # copy_ straight into the pinned slice: `out_idx[...] = t.to("cpu",
+        # non_blocking=True)` reads the async copy's destination before the
+        # transfer lands, leaving rows of uninitialized (often all-zero) indices
+        out_idx[q_start:q_end].copy_(best_idx.to(torch.int32), non_blocking=True)
 
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
     return out_dist, out_idx
 
 

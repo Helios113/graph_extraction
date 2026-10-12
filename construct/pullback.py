@@ -183,6 +183,27 @@ def find_output_node(model_graph, output_name):
         raise ValueError(f"'{output_name}' not found. Available: {available}")
 
 
+def _expose_layernorm_stats(model_path: Path) -> None:
+    """Give every fused LayerNormalization node its optional Mean / InvStdDev outputs, in place.
+
+    ORT's LayerNormalization gradient builder reads the forward node's saved mean and inverse std
+    (outputs 1 and 2); a graph exported with only output 0 (e.g. GPT-2's ln_2, unlike
+    simple_stories, whose norm is decomposed into ReduceMean/Sqrt/Reciprocal) fails gradient
+    construction with `i < node_->OutputDefs().size()`. The extra outputs are values the op already
+    computes, so the forward result is unchanged. External data is left where it is (the model is
+    loaded without it and the initializers keep their external references)."""
+    model = onnx.load(str(model_path), load_external_data=False)
+    changed = False
+    for i, node in enumerate(model.graph.node):
+        if node.op_type == "LayerNormalization" and len(node.output) < 3:
+            base = node.name or f"layernorm_{i}"
+            while len(node.output) < 3:
+                node.output.append(f"{base}_{'mean' if len(node.output) == 1 else 'inv_std_dev'}")
+            changed = True
+    if changed:
+        onnx.save(model, str(model_path))
+
+
 def generate_subgraph_pullback(
     sub_graph_path: Path,
     loss_type: LossType,
@@ -219,6 +240,7 @@ def generate_subgraph_pullback(
             temp_dir=Path(tmp),
         )
     
+        _expose_layernorm_stats(target_path)
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
         print(output_name)
         generated_path = generate_artifacts(

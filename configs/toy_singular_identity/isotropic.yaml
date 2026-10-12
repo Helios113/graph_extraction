@@ -1,0 +1,21 @@
+# Baseline: every key spelled out (copy this as a template -- any key left out
+# of a config falls back to DEFAULTS in toy_singular_identity.py).
+# Isotropic sampling: the 385 identity coords dominate every pair distance, so
+# g ~ 1 in all three regimes and the singularity at x_0 = 0 is invisible.
+dim: 386
+n: 1000
+rest_scale: 0.001
+one_side_range: [-1.0, -0.001]   # true K_L = 2 * 0.001
+near_width: 10
+far_range: [0.5, 1.0]
+regimes: [one_side, near, far]
+n_pairs: 200000
+n_tail_min: 200
+n_tail_max: 300
+n_tail_step: 200
+eqd_n_boot: 200
+m_plotting_points: 50
+n_scatter: 20000
+seed: 0
+out: figures/toy_singular_identity/isotropic.png
+device: null                     # cuda | cpu | null (cuda if available)

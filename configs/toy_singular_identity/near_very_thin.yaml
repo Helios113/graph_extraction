@@ -1,0 +1,6 @@
+# Near regime only, very thin cloud: with rest_scale 3e-4 the near pairs finally
+# line up with e_0 and c_hat approaches the true K_L = 0 (~0.02 at 50k pairs;
+# it was ~0.59 at rest_scale 0.01).
+rest_scale: 0.0003
+regimes: [near]
+out: figures/toy_singular_identity/near_very_thin.png

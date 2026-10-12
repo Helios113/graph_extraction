@@ -1,0 +1,6 @@
+# Fast CPU smoke test (~5 s): fewer pairs and bootstrap resamples.
+rest_scale: 0.01
+n_pairs: 50000
+eqd_n_boot: 50
+device: cpu
+out: figures/toy_singular_identity/quick.png

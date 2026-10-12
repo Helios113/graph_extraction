@@ -26,7 +26,17 @@ Mechanism (per sublayer, per sample, per tau, per position `pos`):
      (n_vocab, d_model) activation cloud at position `pos` (same
      autoencoder.data.load_sample_cloud pull used to fit the manifold
      sampler, but consumed directly -- no autoencoder/fit_stats involved).
-  2. Sample: x = anchor_point + N(0, tau^2 I) in ambient (d_model) space.
+  2. Sample: x = anchor_point + noise in ambient (d_model) space, where
+     noise is uniform in the d_model-dimensional ball of radius tau
+     (--dist ball, the default; same ball sampling as
+     scripts.python.generate_tangent_sweep but in ambient rather than
+     tangent coordinates) or N(0, tau^2 I) (--dist gaussian).
+     --dist global skips steps 1-2's anchoring entirely: x is uniform in
+     one ball centred on the cloud's mean at `pos`, of radius tau * (max
+     distance of any real cloud point from that mean) -- tau=1 is the
+     smallest such ball enclosing the whole cloud, so points are truly
+     ambient rather than near any particular real activation (anchor is
+     stored as -1).
   3. Context: base_seqs[sample_idx] (the same fixed sequence used elsewhere
      in this sweep family) is run once per (sample, sublayer) through
      ensure_extra_outputs to get REAL src-activations at every position.
@@ -36,7 +46,9 @@ Mechanism (per sublayer, per sample, per tau, per position `pos`):
      subgraph (ensure_subgraphs) and read dst at position `pos`.
 
 Output: one h5 file per (sublayer, sample, tau) --
-{src}.{dst}.tau{t}.sample{idx}.h5 (see execute.sharded_writer.ShardedLayerWriter
+{src}.{dst}.ball{t}.sample{idx}.h5 for --dist ball,
+{src}.{dst}.global{t}.sample{idx}.h5 for --dist global, or
+{src}.{dst}.tau{t}.sample{idx}.h5 for --dist gaussian (see execute.sharded_writer.ShardedLayerWriter
 and CLAUDE.md's per-sublayer resilience pattern), pushed as soon as that
 (sublayer, sample, tau) finishes. Each row holds the sampled src vector, the
 real dst vector, the position, and the anchor index (which real vocab-cloud
@@ -138,17 +150,46 @@ def make_subgraph_map(cfg: ModelConfig, src: str, dst: str, batch_size: int | No
     return map_fn
 
 
+def uniform_ball(n: int, d: int, radius: float, generator: np.random.Generator) -> np.ndarray:
+    """n points uniform in the d-dim ball of `radius` around 0: uniform
+    direction on the sphere, radius * U^(1/d) so volume is covered uniformly."""
+    direction = generator.normal(size=(n, d))
+    direction /= np.linalg.norm(direction, axis=1, keepdims=True)
+    return direction * (radius * generator.random(size=(n, 1)) ** (1.0 / d))
+
+
 def ambient_sample(
-    cloud: np.ndarray, n: int, tau: float, generator: np.random.Generator,
+    cloud: np.ndarray, n: int, tau: float, generator: np.random.Generator, dist: str = "ball",
 ) -> tuple[np.ndarray, np.ndarray]:
     """cloud: (n_vocab, d_model) real activations at one (layer, pos).
     Draws n anchor indices uniformly with replacement and adds isotropic
-    N(0, tau^2 I) noise in ambient space. Returns (points (n, d_model),
-    anchor indices (n,))."""
-    n_vocab = cloud.shape[0]
+    noise in ambient space: uniform in the ball of radius tau
+    (dist="ball") or N(0, tau^2 I) (dist="gaussian"). dist="global" has
+    no anchors: points are uniform in the ball centred on the cloud mean
+    with radius tau * max_v ||cloud_v - mean|| (anchor = -1). Returns
+    (points (n, d_model), anchor indices (n,))."""
+    n_vocab, d_model = cloud.shape
+    if dist == "global":
+        center = cloud.mean(axis=0, dtype=np.float64)
+        radius = tau * float(np.linalg.norm(cloud - center, axis=1).max())
+        pts = center + uniform_ball(n, d_model, radius, generator)
+        return pts.astype(np.float32), np.full(n, -1, dtype=np.int64)
+
     anchor = generator.integers(0, n_vocab, size=n)
-    noise = generator.normal(scale=tau, size=(n, cloud.shape[1])).astype(np.float32)
+    if dist == "ball":
+        noise = uniform_ball(n, d_model, tau, generator).astype(np.float32)
+    elif dist == "gaussian":
+        noise = generator.normal(scale=tau, size=(n, d_model)).astype(np.float32)
+    else:
+        raise ValueError(f"unknown dist {dist!r}")
     return cloud[anchor].astype(np.float32) + noise, anchor.astype(np.int64)
+
+
+def layer_key_for(out_dir: str, src: str, dst: str, dist: str, tau: float, sample_idx: int) -> str:
+    """gaussian keeps the original tau{t} name so earlier runs/readers still
+    line up; ball gets its own ball{t} name so the two never collide."""
+    tag = "tau" if dist == "gaussian" else dist
+    return os.path.join(out_dir, f"{src}.{dst}.{tag}{tau:g}.sample{sample_idx}")
 
 
 def run_sample(
@@ -161,6 +202,7 @@ def run_sample(
     map_fn,
     n: int,
     taus: list[float],
+    dist: str,
     seed: int,
     out_dir: str,
     flush_every: int,
@@ -185,7 +227,7 @@ def run_sample(
     for tau in taus:
         generator = np.random.default_rng(seed)
 
-        layer_key = os.path.join(out_dir, f"{src}.{dst}.tau{tau:g}.sample{sample_idx}")
+        layer_key = layer_key_for(out_dir, src, dst, dist, tau, sample_idx)
         writer = ShardedLayerWriter(
             layer_key=layer_key,
             n_rows=seq * n,
@@ -200,13 +242,17 @@ def run_sample(
             flush_every=flush_every,
             no_push=no_push,
             backend=backend,
-            attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, tau=tau),
+            attrs=dict(sample_idx=sample_idx, n_samples=n, seq=seq, d_model=d_model, tau=tau, dist=dist),
             pusher=pusher,
         )
 
+        if writer.next_row >= writer.n_rows:  # already complete from an earlier run
+            writer.close()
+            continue
+
         row = writer.next_row
         for pos in range(seq):
-            pts, anchor = ambient_sample(cloud[pos], n, tau, generator)  # (n, d_model), (n,)
+            pts, anchor = ambient_sample(cloud[pos], n, tau, generator, dist)  # (n, d_model), (n,)
 
             spliced = np.broadcast_to(ctx, (n, seq, d_model)).copy()  # (n, seq, d_model)
             spliced[:, pos] = pts
@@ -220,11 +266,11 @@ def run_sample(
                 anchor=anchor, multiplicity=np.ones(n, dtype=np.int64),
             )
             row += n
-            print(f"[{src}->{dst}] sample {sample_idx} tau={tau:g} pos={pos}: sampled {n} ambient points",
+            print(f"[{src}->{dst}] sample {sample_idx} {dist} tau={tau:g} pos={pos}: sampled {n} ambient points",
                   flush=True)
 
         writer.close()
-        print(f"[{src}->{dst}] sample {sample_idx} tau={tau:g} done -> {layer_key}", flush=True)
+        print(f"[{src}->{dst}] sample {sample_idx} {dist} tau={tau:g} done -> {layer_key}", flush=True)
 
 
 def main():
@@ -242,9 +288,15 @@ def main():
     p.add_argument("--sublayers", nargs="*", default=None,
                    help="only run these src.dst sublayers (default: every cfg.sublayers entry whose input is in --layers)")
     p.add_argument("--n", type=int, default=1000, help="samples per (sublayer, position)")
+    p.add_argument("--dist", choices=["ball", "gaussian", "global"], default="ball",
+                   help="noise added to each anchor point: 'ball' (default) = uniform in the d_model-dim "
+                        "ball of radius --tau; 'gaussian' = N(0, tau^2 I); 'global' = no anchor, uniform in "
+                        "the ball around the cloud mean of radius --tau x the cloud's max distance from its "
+                        "mean (tau=1 just encloses every real activation)")
     p.add_argument("--tau", type=float, nargs="+", default=[1.0],
-                   help="one or more isotropic Gaussian noise stddevs added to each anchor point -- each "
-                        "gets its own output layer_key ({src}.{dst}.tau{t}.sample{idx}), sharing this "
+                   help="one or more noise scales (ball radius for --dist ball, stddev for --dist gaussian) -- "
+                        "each gets its own output layer_key ({src}.{dst}.ball{t}.sample{idx}, or "
+                        "{src}.{dst}.tau{t}.sample{idx} for gaussian), sharing this "
                         "(sample, sublayer)'s already-loaded ambient cloud/context activations across taus "
                         "instead of reloading them per tau")
     p.add_argument("--seed", type=int, default=0)
@@ -295,7 +347,7 @@ def main():
                 base_ids = load_base_seq(sweep_dir, sample_idx)
                 run_sample(
                     cfg, sweep_dir, src, dst, sample_idx, base_ids, map_fn,
-                    n=args.n, taus=args.tau, seed=args.seed,
+                    n=args.n, taus=args.tau, dist=args.dist, seed=args.seed,
                     out_dir=args.out_dir, flush_every=args.flush_every,
                     no_push=args.no_push, backend=args.backend, pusher=pusher,
                 )

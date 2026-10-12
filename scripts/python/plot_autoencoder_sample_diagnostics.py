@@ -54,21 +54,34 @@ class KernelScore:
     Lambda_j K_sigma(x, x_j), (M + N lambda I) Lambda = N 1; u = 1 on the
     fitted states, decays away from the cloud. Ported from
     gmanifold.validate.KernelScore (gmanifold itself is dead/unimportable on
-    this branch -- see its own syntax error in gmanifold/manifold.py)."""
+    this branch -- see its own syntax error in gmanifold/manifold.py).
+
+    kernel='gauss': K(x) = exp(-|x|^2 / (2 sigma^2)), the paper's Gauss kernel
+    e^{-|x|^2} at width sigma (Remark 3.6). kernel='laplace': the paper's
+    regularized Laplace kernel L_r(x) = e^{-sqrt(|x|^2 + r)} (section 5,
+    used in all its Laplace experiments) at width sigma, i.e.
+    exp(-sqrt(|x|^2 / sigma^2 + r)) -- the minimal-regularity signature,
+    which follows the data more closely and is far better conditioned than
+    the Gauss one (section 6.3). lam is the paper's alpha (eq. 3.3)."""
 
     def __init__(self, X: torch.Tensor, sigma: float | None = None, lam: float = 1e-6,
-                 n_max: int = 8192, seed: int = 0) -> None:
+                 n_max: int = 8192, seed: int = 0, kernel: str = "gauss", r: float = 1e-3) -> None:
+        if kernel not in ("gauss", "laplace"):
+            raise ValueError(f"kernel must be 'gauss' or 'laplace', got {kernel!r}")
         X = X.double()
         if len(X) > n_max:
             X = X[torch.randperm(len(X), generator=torch.Generator().manual_seed(seed))[:n_max].to(X.device)]
-        self.X, self.lam, self.N = X, lam, len(X)
+        self.X, self.lam, self.N, self.kernel, self.r = X, lam, len(X), kernel, r
         self.sigma = float(sigma or knn_single(X.float(), 32)[0][:, -1].median())  # default: median 32-NN distance
         M = self._kernel(X)
         M.diagonal().add_(self.N * lam)
         self.Lam = torch.linalg.solve(M, self.N * torch.ones(self.N, dtype=X.dtype, device=X.device))
 
     def _kernel(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.exp(-torch.cdist(x.double(), self.X) ** 2 / (2 * self.sigma ** 2))
+        d2 = torch.cdist(x.double(), self.X) ** 2 / self.sigma ** 2
+        if self.kernel == "laplace":
+            return torch.exp(-(d2 + self.r).sqrt())
+        return torch.exp(-d2 / 2)
 
     @torch.no_grad()
     def __call__(self, Y: torch.Tensor, chunk: int = 4096) -> torch.Tensor:

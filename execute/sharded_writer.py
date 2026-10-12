@@ -172,6 +172,7 @@ class ShardedLayerWriter:
         self._progress = self._load_progress()
         self._scratch_dir = os.path.join(_scratch_root(), self.layer_key)
         os.makedirs(self._scratch_dir, exist_ok=True)
+        self._drop_shards_missing_locally()
 
         self._cur_h5: h5py.File | None = None
         self._cur_shard_idx = len(self._progress["completed_shards"])
@@ -188,6 +189,27 @@ class ShardedLayerWriter:
         if self.next_row >= self.n_rows:
             print(f"[sharded_writer] {self.layer_key}: already complete "
                   f"({self.next_row}/{self.n_rows} rows) per {self.progress_path}")
+
+    def _drop_shards_missing_locally(self) -> None:
+        """The progress JSON lives on NFS but un-pushed shards live only on
+        this node's local scratch, so the two can disagree (scratch wiped,
+        or resuming on a different node). Truncate completed_shards at the
+        first un-pushed shard whose local file is gone, so it and every
+        shard after it get recomputed instead of being silently treated as
+        done. Pushed shards are left alone -- they're in NFS staging even if
+        auto_delete removed the local copy."""
+        shards = self._progress["completed_shards"]
+        for i, shard in enumerate(shards):
+            local_path = os.path.join(self._scratch_dir, f"shard_{shard['shard_idx']:05d}.h5")
+            if not shard["pushed"] and not os.path.exists(local_path):
+                print(f"[sharded_writer] {self.layer_key}: WARNING progress lists shard "
+                      f"{shard['shard_idx']} (rows {shard['row_start']}-{shard['row_end']}) as done "
+                      f"but {local_path} is missing and it was never pushed -- recomputing from "
+                      f"row {shard['row_start']} ({len(shards) - i} shard(s) dropped)")
+                del shards[i:]
+                self.next_row = shard["row_start"]  # _save_progress reads this; reset again by the caller
+                self._save_progress()
+                return
 
     def _discard_unfinished_shards(self) -> None:
         """Delete every local scratch shard file at or past _cur_shard_idx --
@@ -264,6 +286,13 @@ class ShardedLayerWriter:
             )
         if row_start != self.next_row:
             raise ValueError(f"expected row_start == next_row ({self.next_row}), got {row_start}")
+        if row_end > self.n_rows:
+            # Without this, the loop below never advances past n_rows and
+            # spins forever closing empty (n_rows-n_rows) shards.
+            raise ValueError(
+                f"row_end={row_end} is past n_rows={self.n_rows} -- if the layer is already "
+                "complete (writer.next_row >= writer.n_rows), skip writing instead"
+            )
 
         pos = row_start
         while pos < row_end:

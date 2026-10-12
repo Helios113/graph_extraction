@@ -218,6 +218,10 @@ def run_sublayer(
             pusher=pusher,
         )
 
+        if writer.next_row >= writer.n_rows:  # already complete from an earlier run
+            writer.close()
+            continue
+
         row = writer.next_row
         for pos in range(seq):
             at_pos = bases["pos"] == pos

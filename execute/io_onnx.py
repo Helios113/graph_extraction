@@ -49,6 +49,51 @@ def run_iobinding_gpu(
     return torch.utils.dlpack.from_dlpack(ort_output._ortvalue.to_dlpack())
 
 
+def run_iobinding_gpu_inputs(
+    session: onnxruntime.InferenceSession,
+    inputs: dict[str, torch.Tensor],
+    output_names: list[str],
+    device_id: int = 0,
+    io_binding: onnxruntime.IOBinding | None = None,
+) -> list[torch.Tensor]:
+    """
+    Multi-input/multi-output version of run_iobinding_gpu: every input is a
+    GPU-resident torch tensor (bound in place, no host<->device copy), every
+    output stays GPU-resident as a torch tensor via dlpack. For hot loops
+    whose inputs are already on the GPU (e.g. a one-hot mask plus a large
+    activation batch fed to a pullback graph), where
+    run_iobinding_cpu_inputs_gpu_output would round-trip them through host.
+
+    The caller must keep `inputs` alive until this returns. `io_binding`:
+    same reuse semantics as run_iobinding_cpu_inputs_gpu_output.
+
+    ORT runs on its own CUDA stream, not torch's current one, so the inputs
+    are synchronized first -- otherwise ORT can read a buffer torch has
+    queued (but not finished) writing, e.g. a reused buffer refilled for
+    this call.
+    """
+    io_binding = io_binding or session.io_binding()
+    io_binding.clear_binding_inputs()
+    io_binding.clear_binding_outputs()
+    inputs = {name: t.contiguous() for name, t in inputs.items()}
+    torch.cuda.synchronize()
+    for name, t in inputs.items():
+        io_binding.bind_input(
+            name=name,
+            device_type="cuda",
+            device_id=device_id,
+            element_type=_torch_to_np_dtype(t.dtype),
+            shape=tuple(t.shape),
+            buffer_ptr=t.data_ptr(),
+        )
+    for output_name in output_names:
+        io_binding.bind_output(output_name, device_type="cuda", device_id=device_id)
+
+    session.run_with_iobinding(io_binding)
+
+    return [torch.utils.dlpack.from_dlpack(ort_output._ortvalue.to_dlpack()) for ort_output in io_binding.get_outputs()]
+
+
 def run_iobinding_cpu_input_gpu_output(
     session: onnxruntime.InferenceSession,
     input_name: str,

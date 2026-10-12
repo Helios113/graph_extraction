@@ -284,12 +284,18 @@ def load_ratio_cloud(
     pos: int,
     n_pairs: int,
     seed: int,
-) -> np.ndarray:
+    return_dists: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Loads this (sample, pos)'s full vocab-sweep input/output vec rows
     directly from local scratch (same path lipschitz_ratio_eqd_fit.py's
     run_sample uses) and recomputes the full-resolution ratio array -- not
     the n_pairs_save-sized subsample already written to that script's h5
-    output, since bootstrapping needs the full --n-pairs density."""
+    output, since bootstrapping needs the full --n-pairs density.
+
+    return_dists=True also returns (input_dist, output_dist) -- the raw
+    pairwise distances the ratio was computed from -- instead of discarding
+    them; default False keeps the original ratio-only return for existing
+    callers."""
     in_layer_key = os.path.join(perturbed_sweep_dir, sublayer_input)
     out_layer_key = os.path.join(perturbed_sweep_dir, sublayer_output)
     in_manifest = load_layer_manifest(".", in_layer_key)
@@ -311,7 +317,9 @@ def load_ratio_cloud(
     out_vec = out_vec.reshape(seq_len, vocab_size, -1)[pos]
 
     rng = np.random.default_rng(seed + sample_idx)
-    _input_dist, _output_dist, ratio = compute_lipschitz_ratios(in_vec, out_vec, n_pairs=n_pairs, rng=rng)
+    input_dist, output_dist, ratio = compute_lipschitz_ratios(in_vec, out_vec, n_pairs=n_pairs, rng=rng)
+    if return_dists:
+        return input_dist, output_dist, ratio
     return ratio
 
 

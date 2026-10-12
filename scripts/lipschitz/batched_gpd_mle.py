@@ -33,6 +33,8 @@ scripts.analysis.batched_gpd_mle`) across a range of true (xi, sigma) and
 sample sizes.
 """
 
+import math
+
 import torch
 
 
@@ -247,6 +249,107 @@ def fit_gpd_batched(
         active_idx = active_idx[~(converged & improves_active)]
 
     return best_xi, best_sigma, best_converged & torch.isfinite(best_nll)
+
+
+def fit_gpd_c_hat_constrained_batched(
+    z: torch.Tensor,
+    threshold: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    xi_grid: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fits GPD(xi, sigma, loc=0) to every row of z independently, same as
+    fit_gpd_batched, but constrained to xi < 0 AND c_hat = threshold +
+    sigma/xi >= 0 -- i.e. the fitted tail must have a finite left endpoint
+    (xi<0, required for c_hat to be defined at all) and that endpoint must
+    be non-negative, since this codebase's ratios g = ||f(x)-f(y)||/||x-y||
+    are always >= 0 so a negative estimated infimum isn't physically valid.
+
+    The unconstrained MLE (fit_gpd_batched) is a genuinely unconstrained
+    2-parameter optimum and can land with c_hat<0 (observed on real
+    co-Lipschitz-ratio data -- see scripts/analysis/list_flagged_positions.py).
+    Rather than a general constrained 2D optimizer, this exploits the
+    constraint's structure: substituting the boundary sigma = -xi*threshold
+    (from c_hat=0) reduces the negative log-likelihood to a 1D function of
+    xi alone, so the constrained optimum -- if the unconstrained one
+    violates c_hat>=0 -- lies somewhere on this boundary curve, found here
+    by evaluating gpd_negloglik on a batched grid of candidate xi<0 values
+    (default: 2000 points log-spaced-ish over (-5, -1e-4)) and taking the
+    grid minimum. This is a bounded grid search, not Newton's method --
+    robust (no convergence failures near the xi=0/support boundary this
+    constrained region borders) at the cost of grid resolution rather than
+    exact convergence; --n-tail-sized batches make this cheap relative to
+    fit_gpd_batched's own multi-start Newton cost.
+
+    z: (..., n) non-negative exceedances, MUST be float64 (see
+    fit_gpd_batched). threshold: (...,) this row's threshold u (same shape
+    as z's batch dims) -- c_hat = u + sigma/xi. mask: (..., n) bool, as
+    fit_gpd_batched. xi_grid: (g,) candidate xi<0 values to search, shared
+    across every batch row; default is 2000 points geometrically spaced
+    over (-5, -1e-4) (denser near 0, where GPD tail behavior changes
+    fastest).
+
+    Returns (xi, sigma): (...,) tensors, both nan for any batch item whose
+    grid search found no finite-negloglik candidate (degenerate row, e.g.
+    all-zero exceedances)."""
+    if mask is None:
+        mask = torch.ones_like(z, dtype=torch.bool)
+    batch_shape = z.shape[:-1]
+    device, dtype = z.device, z.dtype
+
+    if xi_grid is None:
+        # Denser near 0 (where the profiled negloglik along this boundary
+        # tends to curve fastest) via a log-spaced magnitude, all negative.
+        xi_grid = -torch.logspace(-4, math.log10(5.0), 2000, device=device, dtype=dtype)
+
+    n_grid = xi_grid.shape[0]
+    xi_cand = xi_grid.view(*([1] * len(batch_shape)), n_grid).expand(*batch_shape, n_grid)
+    sigma_cand = -xi_cand * threshold.unsqueeze(-1)  # boundary c_hat=0: sigma = -xi*u
+
+    z_exp = z.unsqueeze(-2).expand(*batch_shape, n_grid, z.shape[-1])
+    mask_exp = mask.unsqueeze(-2).expand(*batch_shape, n_grid, z.shape[-1])
+    nll = gpd_negloglik(xi_cand, sigma_cand, z_exp, mask_exp)  # (..., n_grid)
+
+    best_nll, best_idx = nll.min(dim=-1)
+    best_xi = torch.gather(xi_cand, -1, best_idx.unsqueeze(-1)).squeeze(-1)
+    best_sigma = torch.gather(sigma_cand, -1, best_idx.unsqueeze(-1)).squeeze(-1)
+    invalid = ~torch.isfinite(best_nll)
+    best_xi = torch.where(invalid, torch.full_like(best_xi, float("nan")), best_xi)
+    best_sigma = torch.where(invalid, torch.full_like(best_sigma, float("nan")), best_sigma)
+    return best_xi, best_sigma
+
+
+def fit_gpd_c_hat_nonneg_batched(
+    z: torch.Tensor,
+    threshold: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    xi_grid: torch.Tensor | None = None,
+    n_iters: int = 10,
+    max_backtrack: int = 30,
+    ridge: float = 1e-8,
+    tol: float = 1e-4,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """fit_gpd_batched's unconstrained MLE where that's already feasible
+    (xi<0 and c_hat=threshold+sigma/xi>=0), else
+    fit_gpd_c_hat_constrained_batched's boundary-constrained fit -- the
+    combined "best fit subject to c_hat>=0" this codebase's ratios (always
+    >= 0) actually require, using the unconstrained optimizer's better
+    precision wherever the constraint isn't binding rather than always
+    paying the constrained grid search's coarser resolution.
+
+    Returns (xi, sigma, was_constrained): was_constrained is True for every
+    row where the unconstrained fit was infeasible (or didn't converge) and
+    the boundary solve was used instead -- lets a caller distinguish "this
+    row's unconstrained fit already respected c_hat>=0" from "the
+    constraint was actually binding here"."""
+    xi_u, sigma_u, converged = fit_gpd_batched(z, mask, n_iters, max_backtrack, ridge, tol)
+    c_hat_u = threshold + sigma_u / torch.where(xi_u < 0, xi_u, torch.full_like(xi_u, -1.0))
+    feasible = converged & (xi_u < 0) & (c_hat_u >= 0)
+
+    xi_c, sigma_c = fit_gpd_c_hat_constrained_batched(z, threshold, mask, xi_grid)
+
+    xi = torch.where(feasible, xi_u, xi_c)
+    sigma = torch.where(feasible, sigma_u, sigma_c)
+    return xi, sigma, ~feasible
 
 
 def _newton_from_start(

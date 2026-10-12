@@ -138,11 +138,13 @@ def load_row_range(
 
 def compute_lipschitz_ratios_gpu(
     vec_in: torch.Tensor, vec_out: torch.Tensor, n_pairs: int, generator: torch.Generator,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return_pairs: bool = False,
+) -> tuple[torch.Tensor, ...]:
     """GPU torch equivalent of lipschitz_ratio_eqd_fit.py's
     compute_lipschitz_ratios. vec_in, vec_out: (n_points, d) tensors on the
     target device. Returns (input_dist, output_dist, ratio), each (n_pairs,)
-    float64 tensors on the same device."""
+    float64 tensors on the same device, plus the (i, j) point indices of
+    each pair if return_pairs."""
     device = vec_in.device
     n_points = vec_in.shape[0]
     max_pairs = n_points * (n_points - 1) // 2
@@ -159,6 +161,8 @@ def compute_lipschitz_ratios_gpu(
     input_dist = torch.linalg.norm((vec_in[i] - vec_in[j]).double(), dim=-1)
     output_dist = torch.linalg.norm((vec_out[i] - vec_out[j]).double(), dim=-1)
     ratio = output_dist / input_dist
+    if return_pairs:
+        return input_dist, output_dist, ratio, i, j
     return input_dist, output_dist, ratio
 
 
@@ -519,9 +523,9 @@ def main() -> None:
     )
     parser.add_argument("--n-pairs", type=int, default=200_000)
     parser.add_argument("--n-pairs-save", type=int, default=10_000)
-    parser.add_argument("--n-tail-min", type=int, default=1_000)
-    parser.add_argument("--n-tail-max", type=int, default=5_000)
-    parser.add_argument("--n-tail-step", type=int, default=1000)
+    parser.add_argument("--n-tail-min", type=int, default=200)
+    parser.add_argument("--n-tail-max", type=int, default=1100)
+    parser.add_argument("--n-tail-step", type=int, default=200)
     parser.add_argument(
         "--eqd-n-boot", type=int, default=200,
     )

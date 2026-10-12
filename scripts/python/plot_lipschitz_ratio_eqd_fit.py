@@ -51,7 +51,7 @@ def plot_detail(pair_dir: str, sample_idx: int, pos: int, out_path: str | None) 
         grp = h5f[grp_name]
         ratio = grp["ratio"][:]
 
-        fig, (ax_hist, ax_eqd) = plt.subplots(1, 2, figsize=(12, 5))
+        fig, (ax_hist, ax_tail, ax_eqd) = plt.subplots(1, 3, figsize=(16, 5))
 
         ax_hist.hist(ratio, bins=100, color="steelblue", alpha=0.8)
         if "threshold" in grp.attrs:
@@ -70,6 +70,27 @@ def plot_detail(pair_dir: str, sample_idx: int, pos: int, out_path: str | None) 
         ax_hist.set_xlabel("ratio g = ||f(x)-f(y)|| / ||x-y||")
         ax_hist.set_ylabel("count")
         ax_hist.set_title(f"ratio distribution (N={ratio.size})")
+
+        if "threshold" in grp.attrs:
+            # `ratio` here is only the n_pairs_save-sized scatter subsample
+            # saved to h5 (see gather_position/generate_perturbed_sweep's
+            # write_sample_h5), not the full n_pairs cloud the fit's
+            # exceedances were actually drawn from -- so this tail is a
+            # SUBSAMPLE of the real tail (scaled down by
+            # n_pairs_save/n_pairs), not the eqd_best_n_tail-sized set the
+            # GPD was fit to. Good enough to see the tail's shape; use
+            # scripts/analysis/compare_gpd_estimators.py (which regenerates
+            # the full cloud from perturbed-sweep shards) for exact
+            # exceedances.
+            threshold = grp.attrs["threshold"]
+            tail_subsample = ratio[ratio < threshold]
+            ax_tail.hist(tail_subsample, bins=50, color="steelblue", alpha=0.8)
+            ax_tail.set_title(f"tail subsample below threshold (n={tail_subsample.size})")
+        else:
+            ax_tail.text(0.5, 0.5, "no threshold (no fit)", ha="center", va="center")
+            ax_tail.set_title("tail subsample below threshold")
+        ax_tail.set_xlabel("ratio g")
+        ax_tail.set_ylabel("count")
 
         if "eqd_sweep" in grp:
             n_tail_values = grp["eqd_n_tail_values"][:]

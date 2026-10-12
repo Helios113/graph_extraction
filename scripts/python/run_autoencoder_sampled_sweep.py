@@ -217,6 +217,10 @@ def _write_variant(
         pusher=pusher,
     )
 
+    if writer.next_row >= writer.n_rows:  # already complete from an earlier run
+        writer.close()
+        return
+
     row = writer.next_row
     for pos in range(seq):
         pts = pts_by_pos[pos]

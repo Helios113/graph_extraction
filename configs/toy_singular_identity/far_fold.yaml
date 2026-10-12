@@ -1,0 +1,7 @@
+# Far regime only, wider gap around the singularity: no sampled point has
+# local sigma_min(J) < 1 (2|x_0| >= 1.2), yet pairs straddling x_0 = 0 with
+# x_0 ~ -y_0 drive g toward 0 -- the fold, seen only through the chord.
+rest_scale: 0.01
+far_range: [0.6, 1.0]
+regimes: [far]
+out: figures/toy_singular_identity/far_fold.png
