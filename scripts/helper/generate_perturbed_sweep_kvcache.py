@@ -47,7 +47,6 @@ from construct.kv_cache_subgraph import (
     past_kv_input_names,
     present_kv_names,
 )
-from execute.remote_storage import AsyncPusher
 from execute.sharded_writer import ShardedLayerWriter, load_base_seqs
 
 _OOM_BATCH_SHRINK_FACTOR = 0.7
@@ -63,9 +62,11 @@ def _run_prefix(
     """Runs the shared prefix (1, pos) through `sess` with an empty incoming
     KV cache, returning the n_layers*2 present.{i}.{key,value} GPU tensors
     (each (1, n_kv_heads, pos, head_dim)). Called once per (sample, position)
-    -- pos can be 0, in which case prefix_ids is (1, 0) and every layer's
-    present KV comes back with length 0 (the continuation step then attends
-    to nothing but itself, same as an unconditioned first token)."""
+    -- must have pos >= 1: the exported graph cannot run an empty input_ids
+    (ORT's Reshape fails on 0 elements), so pos == 0 skips this call and
+    _run_continuation attends to a zero-length past instead."""
+    if prefix_ids.shape[1] == 0:
+        raise ValueError("_run_prefix needs pos >= 1; pass prefix_kv=None to _run_continuation for pos == 0")
     pos = prefix_ids.shape[1]
     inputs = {
         "input_ids": prefix_ids,
@@ -101,14 +102,16 @@ def _run_continuation(
     io_binding: ort.IOBinding,
     candidate_ids: np.ndarray,
     pos: int,
-    prefix_kv: list[torch.Tensor],
+    prefix_kv: list[torch.Tensor] | None,
     n_layers: int,
     sublayer_output_name: str,
 ) -> torch.Tensor:
     """Runs `candidate_ids` (n_candidates,) as independent length-1
     continuations, each attending back to the same shared `prefix_kv`
     (broadcast across the batch, not duplicated) plus itself. Returns the
-    sublayer activation at the new position, (n_candidates, d_model)."""
+    sublayer activation at the new position, (n_candidates, d_model).
+
+    `prefix_kv=None` (pos == 0) binds a zero-length past instead."""
     n_candidates = candidate_ids.shape[0]
 
     io_binding.clear_binding_inputs()
@@ -129,7 +132,14 @@ def _run_continuation(
     present_names = present_kv_names(n_layers)
     past_names = past_kv_input_names(n_layers)
     expanded = []  # keep references alive until session.run_with_iobinding returns
-    for past_name, present_tensor in zip(past_names, prefix_kv[1:]):  # [0] is the sublayer output
+    if prefix_kv is None:
+        assert pos == 0
+        for inp in sess.get_inputs():
+            if inp.name.startswith("past_key_values."):
+                shape = [d if isinstance(d, int) else 0 for d in inp.shape]
+                shape[0] = n_candidates
+                io_binding.bind_cpu_input(inp.name, np.zeros(shape, dtype=np.float32))
+    for past_name, present_tensor in zip(past_names, prefix_kv[1:] if prefix_kv is not None else []):  # [0] is the sublayer output
         expanded_view = present_tensor.expand(n_candidates, *present_tensor.shape[1:]).contiguous()
         expanded.append(expanded_view)
         io_binding.bind_input(
@@ -147,7 +157,8 @@ def _run_continuation(
 
     sess.run_with_iobinding(io_binding)
     out = io_binding.get_outputs()[0]
-    return torch.utils.dlpack.from_dlpack(out._ortvalue.to_dlpack())
+    # (n_candidates, 1, d_model): drop the length-1 sequence dim
+    return torch.utils.dlpack.from_dlpack(out._ortvalue.to_dlpack())[:, 0]
 
 
 def _np_dtype(torch_dtype: torch.dtype):
@@ -174,7 +185,6 @@ def run_perturbed_sweep_kvcache(
     defer_push: bool = False,
     auto_delete: bool = False,
     project_root: str = ".",
-    upload_workers: int = 4,
     max_in_flight: int = 1,
     n_vocab_sample: int | None = None,
     vocab_sample_seed: int = 0,
@@ -190,7 +200,7 @@ def run_perturbed_sweep_kvcache(
                 cfg, base_seqs, out_dir, n_samples, layer_idx, boundary, flush_every, shard_rows,
                 candidate_batch, no_push=no_push, defer_push=defer_push, auto_delete=auto_delete,
                 project_root=project_root,
-                upload_workers=upload_workers, max_in_flight=max_in_flight,
+                max_in_flight=max_in_flight,
                 n_vocab_sample=n_vocab_sample, vocab_sample_seed=vocab_sample_seed,
             )
             return
@@ -221,7 +231,6 @@ def _run_perturbed_sweep_kvcache_once(
     defer_push: bool = False,
     auto_delete: bool = False,
     project_root: str = ".",
-    upload_workers: int = 4,
     max_in_flight: int = 1,
     n_vocab_sample: int | None = None,
     vocab_sample_seed: int = 0,
@@ -260,8 +269,6 @@ def _run_perturbed_sweep_kvcache_once(
             f.attrs["d_model"] = cfg.d_model
             f.create_dataset("base_seqs", data=base_seqs)
 
-    pusher = None if no_push else AsyncPusher(max_workers=upload_workers)
-
     writer = ShardedLayerWriter(
         layer_key=os.path.join(out_dir, sublayer_output_name.strip("/").replace("/", ".")),
         n_rows=n_rows,
@@ -281,7 +288,6 @@ def _run_perturbed_sweep_kvcache_once(
         defer_push=defer_push,
         auto_delete=auto_delete,
         project_root=project_root,
-        pusher=pusher,
         max_in_flight=max_in_flight,
     )
 
@@ -305,7 +311,7 @@ def _run_perturbed_sweep_kvcache_once(
             continue
 
         prefix_ids = base_seqs[sample_idx : sample_idx + 1, :pos]
-        prefix_kv = _run_prefix(sess, prefix_io_binding, prefix_ids, n_layers)
+        prefix_kv = _run_prefix(sess, prefix_io_binding, prefix_ids, n_layers) if pos > 0 else None
 
         skip_in_group = max(0, writer.next_row - group_row_start)
         for chunk_start in range(skip_in_group, group_size, candidate_batch):
@@ -331,8 +337,6 @@ def _run_perturbed_sweep_kvcache_once(
     pbar.close()
 
     writer.close()
-    if pusher is not None:
-        pusher.shutdown()
 
     print(f"Saved KV-cache perturbed sweep outputs under {out_dir}")
 
@@ -342,10 +346,11 @@ def main() -> None:
     parser.add_argument("config", type=str, help="Path to a toml ModelConfig")
     parser.add_argument("--layer-idx", type=int, required=True,
                          help="Transformer decoder layer index (0-based) to sweep")
-    parser.add_argument("--boundary", type=str, choices=["attn_out", "mlp_out"], required=True,
+    parser.add_argument("--boundary", type=str, choices=["attn_out", "mlp_out", "embed"], required=True,
                          help="Which residual-stream tensor within --layer-idx to record: "
                          "'attn_out' (post-attention residual) or 'mlp_out' (post-MLP residual, "
-                         "also the residual stream entering the next layer)")
+                         "also the residual stream entering the next layer), or 'embed' (token+position "
+                         "embeddings; --layer-idx is ignored)")
     parser.add_argument(
         "--base-seqs-h5", type=str, default="data/smoll_sequences",
         help="Output layer key (from scripts.python.generate_base_sequences) for a sharded "
@@ -371,7 +376,6 @@ def main() -> None:
         "(default: keep it on local scratch disk after pushing). Ignored if --no-push "
         "is also set.",
     )
-    parser.add_argument("--upload-workers", type=int, default=4)
     parser.add_argument("--max-in-flight", type=int, default=1)
     parser.add_argument("--n-vocab-sample", type=int, default=None)
     parser.add_argument("--vocab-sample-seed", type=int, default=0)
@@ -392,7 +396,6 @@ def main() -> None:
         no_push=args.no_push,
         defer_push=args.defer_push,
         auto_delete=args.auto_delete,
-        upload_workers=args.upload_workers,
         max_in_flight=args.max_in_flight,
         n_vocab_sample=args.n_vocab_sample,
         vocab_sample_seed=args.vocab_sample_seed,

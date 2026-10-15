@@ -6,6 +6,7 @@ batch = 8657                   # 14336 (8*896) Jacobian elements chunked in batc
                                # evenly divides d_model=896 for jacobian_position-restricted (single-token) runs
 seq = 4
 d_model = 2048
+block_prefix = "/model/layers"   # decoder-block name prefix in the optimum KV-cache export
 network_dims = [1088, 128]   # autoencoder hidden/latent dims after d_model -- (d_model + 128) / 2, 128
 
 [input_source]

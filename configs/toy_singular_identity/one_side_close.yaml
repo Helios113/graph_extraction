@@ -1,8 +1,0 @@
-# One side only, hugging the singularity: x_0 in [-0.2, -0.01], true K_L = 0.02
-# (reached only by pairs with x_0 and y_0 both near -0.01, differing along e_0).
-# Even with a thin cloud, c_hat lands ~0.19: too few sampled pairs sit that close
-# to the edge, so this shows the pairwise estimate's upward bias on one side.
-rest_scale: 0.001
-one_side_range: [-0.2, -0.01]
-regimes: [one_side]
-out: figures/toy_singular_identity/one_side_close.png

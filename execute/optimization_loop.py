@@ -138,7 +138,10 @@ def optimization_loop(
     input_name: str,
     steps: int,
     optimizer: Optimizer,
+    extra_feeds: dict[str, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """`extra_feeds`: additional constant graph inputs fed every step (e.g. a KV-cache pullback's
+    past K/V); `x` / `target` are only fed if the gradient graph actually has those inputs."""
 
     # Just iterate over y and then no need to copy the x and target
     loss_history = np.zeros((steps, *y0.shape[:-1]))
@@ -153,15 +156,17 @@ def optimization_loop(
                 f"{grad_output_name!r} not found in gradient_session outputs: "
                 f"{sorted(session_output_names)}",
             )
-        loss_output_name = next(
-            name for name in session_output_names if name != grad_output_name
-        )
+        # The pullback graph's outputs are [loss, <forward output>, <input>_grad]: the loss is
+        # always first (iterating the set of names would pick the forward output half the time).
+        loss_output_name = gradient_session.get_outputs()[0].name
+        assert loss_output_name != grad_output_name
 
         session_input_names = {i.name for i in gradient_session.get_inputs()}
         print("isnan y", np.isnan(y).any())
         
         for s in range(steps):
-            feed = {input_name: y, "target": target, "x": x}
+            feed = {input_name: y, "target": target, "x": x, **(extra_feeds or {})}
+            feed = {k: v for k, v in feed.items() if k in session_input_names}
             loss_val, grad_y = gradient_session.run(
                 [loss_output_name, grad_output_name],
                 feed,

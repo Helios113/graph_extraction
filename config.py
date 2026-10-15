@@ -73,6 +73,11 @@ class ModelConfig:
     random_init: bool = False
     batch_by_node: dict[str, int] = field(default_factory=dict)
     network_dims: list[int] = field(default_factory=lambda: [512, 32])
+    # Name prefix of the decoder blocks in the optimum KV-cache ONNX export, as
+    # "{block_prefix}.{layer_idx}/Add" -- e.g. "/transformer/h" for GPT-2,
+    # "/model/layers" for Llama-style models. Only needed for the KV-cache path
+    # (construct/kv_cache_subgraph.py).
+    block_prefix: str | None = None
 
     def batch_for_node(self, node: str | None = None) -> int:
         """The fixed ONNX batch dim to use on `node` (default: the current

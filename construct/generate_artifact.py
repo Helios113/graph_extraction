@@ -8,9 +8,61 @@ from construct.onnx_block_utils import set_temp_file_names
 from construct.gradient_block import GradientBlock
 from onnxruntime.training.onnxblock.optim import AdamW, SGD
 from config import OptimizerType
+import numpy as np
 import onnx
+from onnx import numpy_helper
 
 from onnxruntime.training import onnxblock
+
+
+def _expand_loss_seed_grads(model: onnx.ModelProto) -> None:
+    """Make each loss-gradient seed `<out>_grad` a ones tensor of `<out>`'s runtime shape.
+
+    The gradient builder seeds backprop with a `[1]` ones initializer even when the loss output is
+    non-scalar (e.g. `[B, 1]`). The CUDA `com.microsoft::DivGrad` does not broadcast `dY`, so a
+    Div-terminated loss silently returns wrong gradients for rows 1.. (the CPU kernel broadcasts).
+    The output shape may be symbolic, so the seed is computed as ConstantOfShape(Shape(out)).
+    """
+    graph = model.graph
+    inits = {i.name: k for k, i in enumerate(graph.initializer)}
+    drop, new_nodes = [], []
+    for o in graph.output:
+        seed = f"{o.name}_grad"
+        dims = o.type.tensor_type.shape.dim
+        if seed not in inits or not dims:
+            continue
+        init = graph.initializer[inits[seed]]
+        if init.dims != [1]:
+            continue
+        one = numpy_helper.to_array(init).reshape(())
+        shape_name = f"{o.name}_seed_shape"
+        new_nodes += [
+            onnx.helper.make_node("Shape", [o.name], [shape_name], name=f"{seed}_Shape"),
+            onnx.helper.make_node(
+                "ConstantOfShape", [shape_name], [seed], name=f"{seed}_Fill",
+                value=numpy_helper.from_array(np.array([one])),
+            ),
+        ]
+        drop.append(inits[seed])
+    if not new_nodes:
+        return
+    for k in sorted(drop, reverse=True):
+        del graph.initializer[k]
+    nodes = list(graph.node) + new_nodes
+    # topological re-sort (the seed's consumer precedes the producer of `out` in the builder's order)
+    avail = {i.name for i in graph.initializer} | {i.name for i in graph.input}
+    avail.add("")
+    ordered, pending = [], nodes
+    while pending:
+        ready = [n for n in pending if all(x in avail for x in n.input)]
+        if not ready:
+            raise RuntimeError("cycle while re-sorting gradient graph")
+        for n in ready:
+            avail.update(n.output)
+        ordered += ready
+        pending = [n for n in pending if n not in ready]
+    del graph.node[:]
+    graph.node.extend(ordered)
 
 
 def generate_artifacts(
@@ -95,6 +147,7 @@ def generate_artifacts(
     with onnxblock.base(loaded_model, str(model_path)):
         _ = gradients_block(*[output.name for output in loaded_model.graph.output])
         gradients_model, loss_model = gradients_block.to_model_proto()
+    _expand_loss_seed_grads(gradients_model)
 
 
     def _save_with_data_file(model_proto, model_path, data_file_name):

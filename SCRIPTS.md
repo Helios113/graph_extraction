@@ -391,3 +391,20 @@ CPU is fine (~1 min); writes figures/paper/lipschitz_evt_toy_{f}_{sampling}.{pdf
 
 uv run python -m scripts.analysis.plot_lipschitz_evt_toy_paper
 uv run python -m scripts.analysis.plot_lipschitz_evt_toy_paper --f fold_xy --sampling radius
+
+
+KV-CACHE PERTURBED SWEEP (scripts/helper/generate_perturbed_sweep_kvcache.py) -- same output format as
+generate_perturbed_sweep.py, but runs each (sample, pos) prefix once and the vocab candidates as batched
+length-1 continuations. --boundary is attn_out | mlp_out | embed (--layer-idx ignored for embed). Needs
+`block_prefix` in the config toml. GPU only; --out-dir is project-relative; pushes via the NFS relay.
+
+sbatch --job-name=kv_sweep_gpt2 --partition=ampere --nodelist=mauao --time=04:00:00 \
+  --output=logs/kv_sweep_gpt2_%j.out \
+  --wrap="uv run python -m scripts.helper.generate_perturbed_sweep_kvcache configs/gpt2.toml \
+    --layer-idx 1 --boundary attn_out --base-seqs-h5 data/gpt2_sequences \
+    --out-dir onnx_models/gpt2/perturbed_sweep_kvcache --n-samples 64 --candidate-batch 2048"
+
+KV-CACHE TESTS (tests/kv_tests, plan + status in tests/kv_tests/TESTS.md). GPU node required:
+
+srun --partition=interactive --nodelist=mauao --gres=gpu:a40:1 --time=01:00:00 --cpus-per-task=8 --mem=64G \
+  uv run pytest tests/kv_tests -q

@@ -5,6 +5,7 @@ vocab_size = 50257
 batch = 25026                   # Jacobian one-hot sweep is chunked in batches of this size
 seq = 4
 d_model = 768
+block_prefix = "/transformer/h"   # decoder-block name prefix in the optimum KV-cache export
 network_dims = [448, 128]   # autoencoder hidden/latent dims after d_model -- (d_model + 128) / 2, 128
 
 [input_source]

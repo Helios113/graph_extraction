@@ -170,6 +170,7 @@ scratch-only output path (checkpoints):
   correct here, and stays scratch-only unless a task says otherwise.
 
 
+Add TQDM progress bars to all long running scripts
 
 <!-- # Execution & Editing Guidelines -->
 <!-- 
@@ -181,3 +182,7 @@ scratch-only output path (checkpoints):
   1. **Diagnosis:** Clearly identify and explain the root cause of the issue or the reason for the requested change.
   2. **Proposed Solution:** Outline the fix conceptually.
   3. **Code Snippets:** Provide the exact code snippets or diffs in the chat output for manual review and application, specifying the relevant file paths and line numbers. -->
+
+
+
+Give me a concrete answer no extending it further or future suggestions.
