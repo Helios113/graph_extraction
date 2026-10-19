@@ -1,0 +1,167 @@
+name = "opt-125m"
+model = "facebook/opt-125m"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 50272
+batch = 1024                   # Jacobian one-hot sweep is chunked in batches of this size
+seq = 4
+d_model = 768
+block_prefix = "/model/decoder/layers"   # decoder-block name prefix in the optimum KV-cache export
+network_dims = [448, 128]   # autoencoder hidden/latent dims after d_model
+
+[input_source]
+tokenizer = "SimpleStories/SimpleStories-V2-11M"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
+
+
+[[sublayers]]
+input = "input_ids"
+output = "add_2"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_2"
+output = "add_3"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_3"
+output = "view_7"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_7"
+output = "add_5"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_5"
+output = "view_13"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_13"
+output = "add_7"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_7"
+output = "view_19"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_19"
+output = "add_9"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_9"
+output = "view_25"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_25"
+output = "add_11"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_11"
+output = "view_31"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_31"
+output = "add_13"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_13"
+output = "view_37"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_37"
+output = "add_15"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_15"
+output = "view_43"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_43"
+output = "add_17"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_17"
+output = "view_49"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_49"
+output = "add_19"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_19"
+output = "view_55"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_55"
+output = "add_21"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_21"
+output = "view_61"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_61"
+output = "add_23"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_23"
+output = "view_67"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "view_67"
+output = "add_25"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]
+
+[[sublayers]]
+input = "add_25"
+output = "view_73"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 768]

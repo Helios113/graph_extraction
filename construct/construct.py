@@ -3,7 +3,7 @@ from pathlib import Path
 
 import onnx
 
-from config import ModelConfig, SublayerConfig
+from construct.config import ModelConfig, SublayerConfig
 from construct.fs_utils import _strip_last_quantifier, exclusive_lock
 from construct.model_export import export_base_model
 from construct.pullback import find_output_node, generate_subgraph_pullback

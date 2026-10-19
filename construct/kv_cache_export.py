@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import ModelConfig
+from construct.config import ModelConfig
 from construct.fs_utils import exclusive_lock
 
 

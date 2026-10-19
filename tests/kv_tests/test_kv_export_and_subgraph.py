@@ -15,7 +15,7 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM
 
-from config import load_config
+from construct.config import load_config
 from construct.kv_cache_export import ensure_kv_cache_model
 from construct.kv_cache_subgraph import (
     boundary_for_index,

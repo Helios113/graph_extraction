@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from transformers.models.auto import AutoModelForCausalLM
 
-from config import ModelConfig
+from construct.config import ModelConfig
 
 
 def _dummy_input(cfg: ModelConfig) -> torch.Tensor:

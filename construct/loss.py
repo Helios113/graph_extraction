@@ -43,10 +43,13 @@ class ReduceSum(onnxblock.blocks._UnaryOp):
 
         return node_output_name
 
-class MaskedSumLoss(
+class JacobianExtractorLoss(
     onnxblock.blocks.Block,
 ):
-    """loss = sum(downstream * mask). One per per-pair graph."""
+    """loss = sum(downstream * mask). One per per-pair graph.
+
+    This is the Jacobian extractor, not an optimisation objective (it is linear, with no minimum): with a one-hot mask
+    the pullback gradient is one row of the Jacobian d output[j] / d input."""
 
     def __init__(self, temp_dir: Path):
         super().__init__()

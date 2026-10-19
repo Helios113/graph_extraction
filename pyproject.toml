@@ -1,34 +1,30 @@
 [project]
-name = "new-jac"
+name = "construct-onnx"
 version = "0.1.0"
-description = "Add your description here"
+description = "Builds the ONNX artifacts (base model, sublayer subgraphs, pullback graphs) for a model config."
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "beartype>=0.22.9",
-    "datasets>=5.0.0",
-    "h5py>=3.16.0",
-    "ipykernel>=7.3.0",
-    "ipywidgets>=8.1.8",
-    "jupyter>=1.1.1",
-    "line-profiler>=5.0.2",
-    "matplotlib>=3.11.1",
-    "ml-dtypes>=0.6.0",
-    "notebook>=7.6.1",
+    "numpy",
     "onnx>=1.22.0",
     "onnxruntime-training>=1.19.2",
     "onnxscript>=0.7.1",
     "optimum-onnx>=0.1.0",
-    "paramiko>=5.0.0",
-    "plotly>=7.1.0",
-    "pyyaml>=6.0.3",
-    "scikit-learn>=1.9.0",
-    "scipy>=1.17.1",
-    "textual>=8.2.8",
     "torch>=2.13.0",
-    "tqdm>=4.70.0",
     "transformers>=4.57,<4.58",
-    "xxhash>=4.0.1",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+construct-onnx-skill = "construct.skill:main"
+
+[tool.setuptools.packages.find]
+include = ["construct*"]
+
+[tool.setuptools.package-data]
+construct = ["SKILL.md"]  # agent usage guide, see construct/skill.py
 
 [tool.uv.sources]
 # onnxruntime-training = { url = "https://github.com/Helios113/onnxruntime/releases/download/grad-1.20.0/onnxruntime_training-1.20.0%2Bcu128-cp311-cp311-linux_x86_64.whl" }

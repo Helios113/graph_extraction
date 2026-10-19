@@ -1,0 +1,119 @@
+name = "tinystories-1m"
+model = "roneneldan/TinyStories-1M"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 50257
+batch = 1024                   # Jacobian one-hot sweep is chunked in batches of this size
+seq = 4
+d_model = 64
+block_prefix = "/transformer/h"   # decoder-block name prefix in the optimum KV-cache export
+network_dims = [96, 128]   # autoencoder hidden/latent dims after d_model
+
+[input_source]
+tokenizer = "SimpleStories/SimpleStories-V2-11M"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
+
+
+[[sublayers]]
+input = "input_ids"
+output = "add"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add"
+output = "add_2"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_2"
+output = "add_5"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_5"
+output = "add_7"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_7"
+output = "add_10"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_10"
+output = "add_12"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_12"
+output = "add_15"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_15"
+output = "add_17"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_17"
+output = "add_20"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_20"
+output = "add_22"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_22"
+output = "add_25"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_25"
+output = "add_27"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_27"
+output = "add_30"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_30"
+output = "add_32"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_32"
+output = "add_35"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_35"
+output = "add_37"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]
+
+[[sublayers]]
+input = "add_37"
+output = "add_40"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 64]

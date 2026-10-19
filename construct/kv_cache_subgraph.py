@@ -28,7 +28,7 @@ from pathlib import Path
 
 import onnx
 
-from config import ModelConfig
+from construct.config import ModelConfig
 from construct.fs_utils import exclusive_lock
 from construct.kv_cache_export import kv_cache_model_dir, kv_cache_model_path
 

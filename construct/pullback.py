@@ -7,7 +7,7 @@ from onnxruntime.training.onnxblock.optim import SGD,AdamW
 
 from onnx import helper
 
-from config import LossType, OptimizerType
+from construct.config import LossType, OptimizerType
 
 from construct.fs_utils import _strip_last_quantifier
 from construct.generate_artifact import generate_artifacts
@@ -15,7 +15,7 @@ from construct.loss import (
     AdversarialLoss_EnvelopeDiffLoss,
     AdversarialLoss_NormalizedSquaredDiffLoss,
     AdversarialLoss_SquaredDiffLoss,
-    MaskedSumLoss,
+    JacobianExtractorLoss,
 )
 
 import numpy as np
@@ -79,9 +79,9 @@ def generate_loss(
 ) -> tuple[Path, onnxblock.blocks.Block, list[str]]:
     names = [output_name]
     match loss_type:
-        case LossType.MaskedSumLoss:
+        case LossType.JacobianExtractorLoss:
             assert input_shape is not None
-            assert temp_dir is not None, "temp_dir required for MaskedSumLoss"
+            assert temp_dir is not None, "temp_dir required for JacobianExtractorLoss"
 
             target_path = _jacobian_modification(
                 sub_graph_path,
@@ -90,7 +90,7 @@ def generate_loss(
                 output_dtype,
             )
             tag = f"{sub_graph_path.stem}_pullback"
-            loss = MaskedSumLoss(target_path.parent)
+            loss = JacobianExtractorLoss(target_path.parent)
 
         case LossType.AdversarialLoss_SquaredDiffLoss:
             assert input_shape is not None
@@ -204,6 +204,34 @@ def _expose_layernorm_stats(model_path: Path) -> None:
         onnx.save(model, str(model_path))
 
 
+def _unshare_identity_initializers(model_path: Path) -> None:
+    """Replace every `Identity(initializer)` node by a private copy of that initializer, in place.
+
+    torch.onnx.export deduplicates identical parameters (e.g. default-initialised LayerNorm
+    weights = 1, biases = 0) into one initializer plus an Identity per extra consumer. ORT then
+    folds the Identities away, leaving several gradient nodes (LayerNormalizationGrad, ...)
+    reading one shared tensor and each emitting the same `<param>_grad` output, which fails with
+    "Duplicate definition of name (<param>_grad)". Giving each consumer its own initializer keeps
+    the forward result identical. External data references are copied as-is (not loaded)."""
+    model = onnx.load(str(model_path), load_external_data=False)
+    inits = {i.name: i for i in model.graph.initializer}
+    outputs = {o.name for o in model.graph.output}
+    keep, changed = [], False
+    for node in model.graph.node:
+        if node.op_type == "Identity" and node.input[0] in inits and node.output[0] not in outputs:
+            copy = onnx.TensorProto()
+            copy.CopyFrom(inits[node.input[0]])
+            copy.name = node.output[0]
+            model.graph.initializer.append(copy)
+            changed = True
+        else:
+            keep.append(node)
+    if changed:
+        del model.graph.node[:]
+        model.graph.node.extend(keep)
+        onnx.save(model, str(model_path))
+
+
 def generate_subgraph_pullback(
     sub_graph_path: Path,
     loss_type: LossType,
@@ -241,6 +269,7 @@ def generate_subgraph_pullback(
         )
     
         _expose_layernorm_stats(target_path)
+        _unshare_identity_initializers(target_path)
         prefix = _strip_last_quantifier(sub_graph_path.stem) + tag
         print(output_name)
         generated_path = generate_artifacts(

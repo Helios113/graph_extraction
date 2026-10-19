@@ -7,7 +7,7 @@ from enum import Enum
 from construct.onnx_block_utils import set_temp_file_names
 from construct.gradient_block import GradientBlock
 from onnxruntime.training.onnxblock.optim import AdamW, SGD
-from config import OptimizerType
+from construct.config import OptimizerType
 import numpy as np
 import onnx
 from onnx import numpy_helper

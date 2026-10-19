@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import torch
 
-from config import ModelConfig, load_config
+from construct.config import ModelConfig, load_config
 from construct.construct import ensure_base_model, ensure_extra_outputs
 from construct.fs_utils import exclusive_lock
 from construct.kv_cache_export import ensure_kv_cache_model
@@ -223,13 +223,13 @@ def kv_sublayer_feeds(sub, hidden: np.ndarray, past_b: dict[str, np.ndarray], pr
 
 def kv_jacobian(cfg, kv_sess, j_in: int, hidden: np.ndarray, prefix: np.ndarray, past=None):
     """Last-token Jacobian J[i, j] = d out_i / d in_j of sublayer j_in -> j_in + 1 via the KV
-    MaskedSum pullback: batch N_CAND == d_model rows, row i has a one-hot mask at dim i.
+    JacobianExtractor pullback: batch N_CAND == d_model rows, row i has a one-hot mask at dim i.
     hidden: (d_model,) the last token's input. Returns (J (d, d), out (d,))."""
-    from config import LossType
+    from construct.config import LossType
     from construct.kv_cache_subgraph import KV_SUBLAYER_IN, KV_SUBLAYER_OUT, ensure_kv_cache_sublayer_pullback
 
     L = prefix.shape[1]
-    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, j_in, N_CAND, LossType.MaskedSumLoss)
+    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, j_in, N_CAND, LossType.JacobianExtractorLoss)
     past = past if past is not None else kv_prefix_past(kv_sess, prefix)
     feeds = kv_sublayer_feeds(sub, np.broadcast_to(hidden, (N_CAND, 1, D_MODEL)), broadcast_past(past, N_CAND), L)
     feeds["mask"] = np.eye(D_MODEL, dtype=np.float32)[:, None, :]
@@ -238,14 +238,14 @@ def kv_jacobian(cfg, kv_sess, j_in: int, hidden: np.ndarray, prefix: np.ndarray,
 
 
 def cacheless_jacobian(ccfg, k: int, in_act: np.ndarray):
-    """Same quantity through the cacheless MaskedSum pullback of config sublayer k (boundary k-1 -> k):
+    """Same quantity through the cacheless JacobianExtractor pullback of config sublayer k (boundary k-1 -> k):
     in_act (S, d_model) is the full sequence input; every batch row gets a copy, with a one-hot mask
     at (row i, last position, dim i). Returns (J (d, d), out_last (d,))."""
-    from config import LossType
+    from construct.config import LossType
     from construct.construct import ensure_subgraph_pullback
 
     fwd, sub = cacheless_sublayer_path(ccfg, k)
-    sub = dataclasses.replace(sub, loss_type=LossType.MaskedSumLoss)
+    sub = dataclasses.replace(sub, loss_type=LossType.JacobianExtractorLoss)
     [pb_path] = ensure_subgraph_pullback([(fwd, sub)], force=False)
     S = in_act.shape[0]
     mask = np.zeros((N_CAND, S, D_MODEL), np.float32)

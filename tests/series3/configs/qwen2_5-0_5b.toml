@@ -1,0 +1,311 @@
+name = "qwen2_5-0_5b"
+model = "Qwen/Qwen2.5-0.5B"   # HF model id, passed to AutoModelForCausalLM.from_pretrained
+input_name = "input_ids"
+vocab_size = 151936
+batch = 1024                   # Jacobian one-hot sweep is chunked in batches of this size
+seq = 4
+d_model = 896
+block_prefix = "/model/layers"   # decoder-block name prefix in the optimum KV-cache export
+network_dims = [512, 128]   # autoencoder hidden/latent dims after d_model
+
+[input_source]
+tokenizer = "SimpleStories/SimpleStories-V2-11M"
+dataset = "Salesforce/wikitext"
+dataset_config = "wikitext-2-raw-v1"
+split = "train"
+text_column = "text"
+
+
+[[sublayers]]
+input = "input_ids"
+output = "embedding"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "embedding"
+output = "add_4"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_4"
+output = "add_6"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_6"
+output = "add_10"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_10"
+output = "add_12"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_12"
+output = "add_16"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_16"
+output = "add_18"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_18"
+output = "add_22"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_22"
+output = "add_24"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_24"
+output = "add_28"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_28"
+output = "add_30"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_30"
+output = "add_34"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_34"
+output = "add_36"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_36"
+output = "add_40"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_40"
+output = "add_42"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_42"
+output = "add_46"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_46"
+output = "add_48"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_48"
+output = "add_52"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_52"
+output = "add_54"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_54"
+output = "add_58"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_58"
+output = "add_60"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_60"
+output = "add_64"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_64"
+output = "add_66"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_66"
+output = "add_70"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_70"
+output = "add_72"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_72"
+output = "add_76"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_76"
+output = "add_78"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_78"
+output = "add_82"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_82"
+output = "add_84"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_84"
+output = "add_88"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_88"
+output = "add_90"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_90"
+output = "add_94"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_94"
+output = "add_96"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_96"
+output = "add_100"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_100"
+output = "add_102"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_102"
+output = "add_106"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_106"
+output = "add_108"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_108"
+output = "add_112"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_112"
+output = "add_114"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_114"
+output = "add_118"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_118"
+output = "add_120"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_120"
+output = "add_124"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_124"
+output = "add_126"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_126"
+output = "add_130"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_130"
+output = "add_132"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_132"
+output = "add_136"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_136"
+output = "add_138"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_138"
+output = "add_142"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]
+
+[[sublayers]]
+input = "add_142"
+output = "add_144"
+loss_type = "JacobianExtractorLoss"
+input_shape = [32, 4, 896]

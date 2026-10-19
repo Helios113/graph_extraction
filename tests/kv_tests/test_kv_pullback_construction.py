@@ -5,7 +5,7 @@ re-computation from the forward pass."""
 import numpy as np
 import pytest
 
-from config import LossType
+from construct.config import LossType
 from construct.kv_cache_subgraph import (
     KV_SUBLAYER_IN, KV_SUBLAYER_OUT, ensure_kv_cache_sublayer, ensure_kv_cache_sublayer_pullback,
 )
@@ -31,7 +31,7 @@ def test_pullback_io_contract(cfg, kind, loss_type):
 
     assert KV_SUBLAYER_IN in inputs and set(sub.extra_inputs) <= set(inputs)
     extra_loss_inputs = {
-        LossType.MaskedSumLoss: {"mask"},
+        LossType.JacobianExtractorLoss: {"mask"},
         LossType.AdversarialLoss_SquaredDiffLoss: {"target"},
         LossType.AdversarialLoss_NormalizedSquaredDiffLoss: {"target", "x"},
         LossType.AdversarialLoss_EnvelopeDiffLoss: {"target", "x"},
@@ -43,16 +43,16 @@ def test_pullback_io_contract(cfg, kind, loss_type):
 
 
 def test_pullback_is_cached(cfg):
-    _, p1 = ensure_kv_cache_sublayer_pullback(cfg, 3, B, LossType.MaskedSumLoss)
+    _, p1 = ensure_kv_cache_sublayer_pullback(cfg, 3, B, LossType.JacobianExtractorLoss)
     mtime = p1.stat().st_mtime_ns
-    _, p2 = ensure_kv_cache_sublayer_pullback(cfg, 3, B, LossType.MaskedSumLoss)
+    _, p2 = ensure_kv_cache_sublayer_pullback(cfg, 3, B, LossType.JacobianExtractorLoss)
     assert p1 == p2 and p2.stat().st_mtime_ns == mtime
 
 
 def test_pullbacks_do_not_collide_across_batch_and_loss(cfg):
     paths = {
         ensure_kv_cache_sublayer_pullback(cfg, 3, b, l)[1]
-        for b in (B, 2 * B) for l in (LossType.MaskedSumLoss, LossType.AdversarialLoss_SquaredDiffLoss)
+        for b in (B, 2 * B) for l in (LossType.JacobianExtractorLoss, LossType.AdversarialLoss_SquaredDiffLoss)
     }
     assert len(paths) == 4
 

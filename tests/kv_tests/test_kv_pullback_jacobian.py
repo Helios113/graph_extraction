@@ -1,5 +1,5 @@
 """Last-token Jacobian d out[pos]/d in[pos] of a sublayer through the KV pullback (prefix K/V as
-constants, MaskedSum loss with one-hot rows) vs the cacheless pullback (full sequence in, last position
+constants, JacobianExtractor loss with one-hot rows) vs the cacheless pullback (full sequence in, last position
 read) vs torch autograd on the HF model, for prefix lengths 0/1/8/32.
 
 Sublayers: attention 0->1, 2->3, 22->23 (the Jacobian includes the token's own K/V path), MLP 1->2, 3->4, 23->24.

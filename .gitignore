@@ -12,3 +12,13 @@ logs/*
 *.out
 *.png
 *.tmp
+*.egg-info/
+
+# plots in results/ are tracked (html + png); data and cached artifacts are not
+!results/**/*.png
+*.npy
+*.npz
+*.xml
+*.onnx_data
+onnx_models/
+**/work/
