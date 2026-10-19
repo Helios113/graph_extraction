@@ -81,7 +81,15 @@ def _embedding_tensor_name(model: onnx.ModelProto, block_prefix: str) -> str:
     layer0_nodes = [n for n in model.graph.node if n.name.startswith(f"{block_prefix}.0/")]
     produced_in_layer0 = {o for n in layer0_nodes for o in n.output}
     add = next(n for n in layer0_nodes if n.name == f"{block_prefix}.0/Add")
-    outside = [i for i in add.input if i not in produced_in_layer0]
+    producer = {o: n for n in layer0_nodes for o in n.output}
+    # Llama-style exports start the layer with a norm whose first node is a Cast of the residual stream, so the
+    # residual input of the Add is that Cast's output: look through Casts to the tensor entering layer 0.
+    resolved = []
+    for i in add.input:
+        while i in producer and producer[i].op_type == "Cast" and producer[i].input[0] not in produced_in_layer0:
+            i = producer[i].input[0]
+        resolved.append(i)
+    outside = [i for i in resolved if i not in produced_in_layer0]
     if len(outside) != 1:
         raise ValueError(f"could not identify the embedding input of {add.name}: {list(add.input)}")
     return outside[0]

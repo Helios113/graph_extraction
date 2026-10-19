@@ -92,6 +92,8 @@ def sublayer_feeds(sub, hidden, past_b, L):
             feeds[name] = np.zeros((n, 1), np.int64)  # only its shape is read
         elif name == "attention_mask":
             feeds[name] = np.ones((n, L + 1), np.int64)
+        elif name == "position_ids":
+            feeds[name] = np.full((n, 1), L, np.int64)
         elif name.startswith("past_key_values."):
             feeds[name] = past_b[name]
         else:
@@ -205,7 +207,7 @@ def run_model(cfg_path):
             bv, hl = hf_boundaries(model, layers, torch.from_numpy(ids).cuda())
             past_b = bcast(prefix_past(prefix), N_FWD)
             out = kv_run(kv_bnd, cand[:, None], past_b, L)
-            report["forward"][str(L)] = {"boundaries": [rel(out[bn][:, 0], bv[j][:, -1].cpu().numpy()) for j, bn in enumerate(bnames)]}
+            report["forward"][str(L)] = {"boundaries": [rel(out[bn].reshape(N_FWD, -1, d)[:, -1], bv[j][:, -1].cpu().numpy()) for j, bn in enumerate(bnames)]}
             lg = kv_run(kv_full, cand[:, None], past_b, L)["logits"][:, 0]
             report["logits"][str(L)] = rel(lg, hl[:, -1].cpu().numpy())
         except Exception as e:  # noqa: BLE001

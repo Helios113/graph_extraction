@@ -17,6 +17,13 @@ LCOL = {0: "#2a78d6", 1: "#eb6834", 8: "#1baf7a", 32: "#6250d6"}  # prefix lengt
 MARK = dict(size=9, line=dict(color="white", width=1))
 
 
+def widen(fig, row, col, series, tol):
+    """Extend the log y-axis upward so values far above the criterion (failures) are not clipped."""
+    top = max([v for s in series for v in s if np.isfinite(v)], default=0)
+    hi = max(np.log10(tol * 1e2), np.ceil(np.log10(top)) if top > 0 else 0)
+    fig.update_yaxes(range=[np.log10(P1.FLOOR), hi], row=row, col=col)
+
+
 def plot_model(rd, rep):
     Ls = rep["prefix_lengths"]
     fig = make_subplots(rows=2, cols=2, vertical_spacing=0.17, horizontal_spacing=0.1, subplot_titles=(
@@ -38,7 +45,7 @@ def plot_model(rd, rep):
     cats = []
     for kind in ("attention", "mlp"):
         for L in Ls:
-            if L:
+            if L in (0, 8, 32):  # optimisation prefix lengths
                 cats.append((kind, L))
     for lk, (ll, col, sym) in P1.LOSS.items():
         for opt in ("SGD", "AdamW"):
@@ -53,6 +60,10 @@ def plot_model(rd, rep):
     for r, c, tol in [(1, 1, TOL["forward"]), (1, 2, TOL["forward"]), (2, 1, TOL["jacobian"])]:
         P1.criterion(fig, r, c, tol)
     P1.criterion(fig, 2, 2, TOL["traj"], eps=False)
+    widen(fig, 1, 1, [e["boundaries"] for e in rep["forward"].values()], TOL["forward"])
+    widen(fig, 1, 2, [list(rep["logits"].values())], TOL["forward"])
+    widen(fig, 2, 1, [[v["rel_fro"] for v in rep["jacobian"].values()]], TOL["jacobian"])
+    widen(fig, 2, 2, [[v["traj_diff"] for v in rep["optimisation"].values()]], TOL["traj"])
     fig.update_xaxes(title_text="residual boundary j (0 = embedding)", row=1, col=1)
     fig.update_xaxes(title_text="sublayer", row=2, col=1)
     fig.update_xaxes(title_text="sublayer type, prefix length", row=2, col=2)
@@ -93,6 +104,8 @@ def plot_summary(summary):
     P1.criterion(fig, 1, 1, TOL["forward"], ncols=3)
     P1.criterion(fig, 1, 2, TOL["jacobian"], text="criterion", eps=False, ncols=3)
     P1.criterion(fig, 1, 3, TOL["traj"], text="criterion", eps=False, ncols=3)
+    for c, keys, tol in [(1, ("forward_max", "logits_max"), TOL["forward"]), (2, ("jacobian_max",), TOL["jacobian"]), (3, ("traj_max",), TOL["traj"])]:
+        widen(fig, 1, c, [[summary[n][k] for n in names if summary[n][k] is not None] for k in keys], tol)
     fig.update_yaxes(title_text="worst case over prefix lengths / sublayers / losses", row=1, col=1)
     fig.update_xaxes(tickangle=-30)
     fig.update_layout(width=1150, height=480, font=P1.FONT, plot_bgcolor="white", paper_bgcolor="white",

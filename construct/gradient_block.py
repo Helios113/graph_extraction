@@ -71,6 +71,9 @@ def _build_gradient_graph_with_intermediates(
     _training_graph_utils._disable_training_mode(eval_model)
 
     options = SessionOptions()
+    # RMSNorm (Llama/Qwen-style) is fused into SimplifiedLayerNormalization with a single output, which has no usable gradient
+    options.add_session_config_entry("optimization.disable_specified_optimizers", "SimplifiedLayerNormFusion")
+    options.log_severity_level = 3  # errors only: the graph transformers log every pass at INFO (thousands of lines)
     if custom_op_library is not None:
         options.register_custom_ops_library(os.fspath(custom_op_library))
 

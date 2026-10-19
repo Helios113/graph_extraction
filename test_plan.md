@@ -53,23 +53,20 @@ Findings: [results/series3/FINDINGS.md](results/series3/FINDINGS.md).
 ## Series 4: Validity on transformers with KV cache
 
 ### Goal
-KV-cache exports (optimum) of GPT-2: are forward and gradients correct, can we optimise well; can we fix a prefix and compute forward, grad and loss only for the last token; does batching of candidates work.
+KV-cache exports (optimum) of the series 3 transformers: are forward and gradients correct, can we optimise well; can we fix a prefix and compute forward, grad and loss only for the last token; does batching of candidates over one shared prefix work.
 
 ### Tests performed
-121 pytest tests in `tests/kv_tests/` (list in `tests/kv_tests/TESTS.md`), on ruapehu H100 (ORT CUDA, fp32, TF32 off), prefix length L ∈ {0, 1, 8, 32}, 768 candidates per prefix:
-- **Forward:** KV export vs HF vs the cacheless pipeline at all 25 boundaries of the last token; prefix + continuation equals the full pass; L = 0 (no prefix, KV graph) equals the seq-len-1 cacheless model.
-- **Last-token subgraphs:** single attention / MLP sublayer subgraphs vs HF and cacheless.
-- **Gradients / full Jacobian (JacobianExtractor):** the 768×768 last-token Jacobian via the KV pullback vs the cacheless pullback vs torch autograd; pullback I/O contract for all four losses.
-- **Batching:** one prefix broadcast over many candidates.
-- **Optimisation:** SGD and AdamW × 3 adversarial losses × attention/MLP × L = 0/8/32 (36 runs), KV pullback vs torch autograd.
-- **Timing:** KV vs cacheless vs HF for one 768-candidate group.
+Script-based (like series 1-3), `tests/series4/run_series4.py`, on ruapehu H100 (ORT CUDA, fp32, TF32 off), five models (`tinystories-1m`, `gpt2`, `smollm2-135m`, `opt-125m`, `qwen2_5-0_5b`, configs from `tests/series3/configs`), prefix length L in {0, 1, 8, 32}. Baseline: the HF model in torch.
+- **Forward:** all 2n+1 residual boundaries and the logits of the last token, KV (prefix past + candidates) vs HF on the full sequence, 16 candidates per prefix.
+- **Gradients:** the full d_model x d_model last-token Jacobian (`JacobianExtractorLoss`, one-hot masks, batch = d_model) of six single sublayers vs torch autograd.
+- **Optimisation:** 30-step SGD and AdamW x 3 adversarial losses x attention (h2->h3) / MLP (h3->h4) x L = 0 / 8 / 32, 8 candidates, KV pullback vs torch autograd.
+- Batching over one shared prefix is inherent in all of the above.
 
-Result 120/121; the one failure is plain SGD diverging in both ORT and torch (see findings).
+The earlier GPT-2-only pytest suite (`tests/kv_tests/`, 121 tests, includes the cacheless comparison and timing) is kept; its findings are in `results/series4/FINDINGS_pytest.md`.
 
 ### Plots
-- **`test_outcomes.png`:** passes/failures per test file.
-- **`trajectory_diff.png`:** for each of the 36 optimisation runs, the max relative difference between the ORT-KV and torch trajectories, against the 1e-3 tolerance: shows the KV pullback gives the same optimisation as torch.
-- **`trajectories.png`:** loss vs step, ORT (solid) against torch (dotted), for an example that converges and the one where SGD diverges, to show that the curves coincide even then.
+- **Per-model `results.png` (4 panels):** (a) last-token boundary activation error per boundary and prefix length, (b) logits error per prefix length, (c) full-Jacobian error per sublayer and prefix length, (d) optimisation trajectory error per sublayer type / prefix length (colour = loss, filled SGD, open AdamW), each against its pass criterion; values above the criterion are shown, not clipped.
+- **`summary.png`:** worst case per model for forward, Jacobian and trajectory.
 
 Findings: [results/series4/FINDINGS.md](results/series4/FINDINGS.md).
 
