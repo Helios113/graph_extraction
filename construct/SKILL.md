@@ -9,6 +9,14 @@ Builds ONNX artifacts for a model **config** (a TOML): base model export -> subg
 
 Import name is `construct` (distribution name `construct-onnx`). Everything is cached on disk and guarded by lock files, so every `ensure_*` call is idempotent and safe to call from several processes.
 
+## TF32 must be OFF (mandatory)
+
+ORT's CUDA EP uses TF32 by default on A40/H100, which adds ~1e-3 relative noise to outputs and gradients and corrupts Jacobians, determinants and small-step optimisation. **Always disable it, every time you run on GPU:**
+
+- Set `NVIDIA_TF32_OVERRIDE=0` in the environment before CUDA is initialised (in the sbatch script, or `os.environ[...]` before importing onnxruntime).
+- Create every CUDA session with `("CUDAExecutionProvider", {"use_tf32": "0"})`. Never pass the bare string `"CUDAExecutionProvider"`.
+- If a result disagrees with torch at the 1e-3 level, first check that both of these are set.
+
 ## Install and environment
 
 ```
@@ -95,7 +103,7 @@ extract_subgraph(model, Path("blk.forward.onnx"), "add", "add_1")        # saves
 # 2. Pullback of that subgraph. input_shape = shape of the subgraph input (static).
 pb = generate_subgraph_pullback(Path("blk.forward.onnx"), LossType.JacobianExtractorLoss,
                                 [B, S, D], "add", "add_1")               # -> Path to ...pullback.onnx
-sess = ort.InferenceSession(str(pb), providers=["CPUExecutionProvider"])  # or CUDA with use_tf32=0
+sess = ort.InferenceSession(str(pb), providers=["CPUExecutionProvider"])  # on GPU: [("CUDAExecutionProvider", {"use_tf32": "0"})] and NVIDIA_TF32_OVERRIDE=0 (mandatory)
 ```
 
 - **File names matter:** the pullback is written next to the subgraph as `<stem minus its last dotted part>.pullback.onnx`. `blk.forward.onnx` -> `blk.pullback.onnx`; a stem without a dot (`sub.onnx`) gives the hidden file `.pullback.onnx`. Use the returned path, name subgraphs `<name>.forward.onnx`, and use one directory per (span, loss) since the name does not encode the loss.
