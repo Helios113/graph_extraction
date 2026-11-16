@@ -58,8 +58,6 @@ def _build_gradient_graph_with_intermediates(
     import copy
     import os
     from onnxruntime import SessionOptions
-    from onnxruntime.capi._pybind_state import get_optimized_model
-
     if isinstance(output_names, str):
         output_names = [output_names]
 
@@ -77,9 +75,13 @@ def _build_gradient_graph_with_intermediates(
     if custom_op_library is not None:
         options.register_custom_ops_library(os.fspath(custom_op_library))
 
-    optimized_model = onnx.load_from_string(
-        get_optimized_model(model.SerializeToString(), requires_grad, options)
-    )
+    # Skip the pre-optimization: with requires_grad set, get_optimized_model fuses
+    # decomposed LayerNorm into a default-domain SimplifiedLayerNormalization node
+    # even with ORT_DISABLE_ALL / the disable entry above (ORT 1.20 training build),
+    # and onnx.checker then rejects the gradient model ("No Op registered for
+    # SimplifiedLayerNormalization with domain_version of 18"). The gradient builder
+    # differentiates the primitive ops natively, so build from the raw graph.
+    optimized_model = model
 
     gradient_model = _training_graph_utils._gradient_model_for(
         optimized_model, requires_grad, output_names[0], options

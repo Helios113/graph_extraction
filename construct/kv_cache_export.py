@@ -22,37 +22,29 @@ import subprocess
 import sys
 from pathlib import Path
 
-from construct.config import ModelConfig
 from construct.fs_utils import exclusive_lock
 
 
-def kv_cache_model_dir(cfg: ModelConfig) -> Path:
-    """Directory holding this config's KV-cache-enabled export (model.onnx
-    plus the tokenizer/config files optimum-cli writes alongside it) --
-    kept separate from cfg.base_model_path's cacheless export since they're
-    different graphs (different inputs/outputs) produced by a different
-    export path."""
-    return cfg.dir / "kv_cache_export"
-
-
-def kv_cache_model_path(cfg: ModelConfig) -> Path:
-    return kv_cache_model_dir(cfg) / "model.onnx"
-
-
-def ensure_kv_cache_model(cfg: ModelConfig, force: bool = False) -> Path:
+def ensure_kv_cache_model(
+    input_name,
+    hf_name,
+    local_save_dir: Path,
+    force: bool = False,
+) -> Path:
     """Exports a KV-cache-enabled ONNX graph for cfg.model if it doesn't
     already exist (or always, if force), guarded by a lockfile like
     ensure_base_model. Only supports input_name == "input_ids" (the
     text-generation-with-past task assumes token-id input, not
     inputs_embeds)."""
-    if cfg.input_name != "input_ids":
+    if input_name != "input_ids":
         raise ValueError(
-            f"{cfg.name}: KV-cache export only supports input_name == 'input_ids', "
-            f"got {cfg.input_name!r}",
+            f"{hf_name}: KV-cache export only supports input_name == 'input_ids', "
+            f"got {input_name!r}",
         )
 
-    out_dir = kv_cache_model_dir(cfg)
-    model_path = kv_cache_model_path(cfg)
+    out_dir = local_save_dir / "kv_cache_export"
+    model_path = out_dir / "model.onnx"
+
     lock_path = out_dir.with_suffix(".kv_cache_export.lock")
     with exclusive_lock(lock_path):
         if not force and model_path.exists():
@@ -61,9 +53,15 @@ def ensure_kv_cache_model(cfg: ModelConfig, force: bool = False) -> Path:
 
         out_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
-            sys.executable, "-m", "optimum.commands.optimum_cli", "export", "onnx",
-            "--model", cfg.model,
-            "--task", "text-generation-with-past",
+            sys.executable,
+            "-m",
+            "optimum.commands.optimum_cli",
+            "export",
+            "onnx",
+            "--model",
+            hf_name,
+            "--task",
+            "text-generation-with-past",
             "--trust-remote-code",
             str(out_dir),
         ]
