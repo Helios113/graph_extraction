@@ -1,28 +1,20 @@
-"""Exports a KV-cache-enabled ONNX graph for a causal LM via `optimum-cli
-export onnx --task text-generation-with-past`, as an alternative to
-construct/model_export.py's cacheless, static-batch export.
-
-Unlike export_base_model (use_cache=False, single (batch, seq) forward pass,
-static batch dim baked in at export time), the graph produced here takes
-`past_key_values.{layer}.{key,value}` as additional inputs (dynamic batch and
-sequence-length axes throughout) and returns `present.{layer}.{key,value}` --
-a prior call's `present` tensors can be fed back in as the next call's `past`,
-so a shared prefix only needs to be run once. See
-scripts/helper/generate_perturbed_sweep_kvcache.py for the sweep that exploits this.
-
-optimum-cli is not importable as a clean Python API (it's a CLI-first tool),
-so this shells out to it rather than reimplementing the export by hand --
-hand-tracing an HF DynamicCache through torch.onnx.export directly runs into
-real tracer issues (e.g. SymBool branches in HF's attention masking code,
-complex-dtype RoPE tensors the legacy exporter can't lower) that optimum's
-export path already handles.
-"""
-
-import subprocess
-import sys
+import os
 from pathlib import Path
 
+from optimum.exporters.onnx import main_export
+
 from construct.fs_utils import exclusive_lock
+
+
+def allowed_cpu_count() -> int:
+    """CPUs this process may actually use (Slurm cpuset-aware)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+    except AttributeError:
+        return os.cpu_count() or 1
 
 
 def ensure_kv_cache_model(
@@ -52,21 +44,20 @@ def ensure_kv_cache_model(
             return model_path
 
         out_dir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            sys.executable,
-            "-m",
-            "optimum.commands.optimum_cli",
-            "export",
-            "onnx",
-            "--model",
-            hf_name,
-            "--task",
-            "text-generation-with-past",
-            "--trust-remote-code",
-            str(out_dir),
-        ]
-        print(f"Exporting KV-cache model: {' '.join(cmd)}", flush=True)
-        subprocess.run(cmd, check=True)
+        print(f"Exporting KV-cache model: {hf_name} -> {out_dir}", flush=True)
+
+        # Set thread count Doesn't work now
+        os.environ["ORT_DISABLE_THREAD_AFFINITY"] = "1"
+        os.environ["OMP_NUM_THREADS"] = str(allowed_cpu_count)
+        print(os.environ["ORT_DISABLE_THREAD_AFFINITY"])
+        print(os.environ["OMP_NUM_THREADS"])
+
+        main_export(
+            model_name_or_path=hf_name,
+            output=out_dir,
+            task="text-generation-with-past",
+            trust_remote_code=True,
+        )
         print(f"KV-cache model exported -> {model_path}")
 
     return model_path

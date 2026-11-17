@@ -398,7 +398,6 @@ def ensure_kv_cache_boundaries(
             sublayer_tensor_name(*boundary_for_index(j), prefix, model)
             for j in range(len(sublayers))
         ]
-        print(names)
         if not force and output_path.exists():
             return output_path, names, n_layers
 
