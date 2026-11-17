@@ -42,7 +42,7 @@ def cfg():
 
 @pytest.fixture(scope="session")
 def model_path(cfg):
-    return ensure_kv_cache_model(cfg)
+    return ensure_kv_cache_model(cfg.input_name, cfg.model, cfg.dir)
 
 
 @pytest.fixture(scope="session")

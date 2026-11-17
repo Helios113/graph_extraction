@@ -108,7 +108,7 @@ def build(op, variant, L):
         if op == "fwd":
             path, out_name, _ = ensure_kv_cache_extra_outputs(cfg, 11, "mlp_out")
         else:
-            sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, PB_J, N, LossType.JacobianExtractorLoss)
+            sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, PB_J, LossType.JacobianExtractorLoss)
             path, out_name, _ = ensure_kv_cache_extra_outputs(cfg, 11, "mlp_out")  # full model for the prefix pass
     elif variant == "cacheless_onnx":
         ccfg = cacheless_cfg(cfg, seq=L + 1, tag="_last" if op == "fwd" else "")

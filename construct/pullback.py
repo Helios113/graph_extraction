@@ -102,7 +102,7 @@ def generate_loss(
                 sub_graph_path,
                 temp_dir,
                 "target",
-                new_inputs=[("target", output_dtype, input_shape)],
+                new_inputs=[("target", output_dtype, ["batch", *input_shape[1:]])],
             )
 
             loss = AdversarialLoss_SquaredDiffLoss(target_path.parent)
@@ -120,8 +120,8 @@ def generate_loss(
                 temp_dir,
                 "adv_inputs",
                 new_inputs=[
-                    ("x", output_dtype, input_shape),
-                    ("target", output_dtype, input_shape),
+                    ("x", output_dtype, ["batch", *input_shape[1:]]),
+                    ("target", output_dtype, ["batch", *input_shape[1:]]),
                 ],
                 # trainable={input_name: np.zeros(input_shape, dtype=np.float32)},
             )
@@ -153,7 +153,7 @@ def _jacobian_modification(
         helper.make_tensor_value_info(
             "mask",
             output_dtype,
-            input_shape,
+            ["batch", *input_shape[1:]],
         ),
     )
 

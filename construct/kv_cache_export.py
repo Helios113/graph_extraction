@@ -1,9 +1,18 @@
 import os
+import os
 from pathlib import Path
 
 from optimum.exporters.onnx import main_export
 
 from construct.fs_utils import exclusive_lock
+
+
+def kv_cache_export_dir(local_save_dir: Path) -> Path:
+    return local_save_dir / "kv_cache_export"
+
+
+def kv_cache_export_path(local_save_dir: Path) -> Path:
+    return kv_cache_export_dir(local_save_dir) / "model.onnx"
 
 
 def allowed_cpu_count() -> int:
@@ -23,18 +32,18 @@ def ensure_kv_cache_model(
     local_save_dir: Path,
     force: bool = False,
 ) -> Path:
-    """Exports a KV-cache-enabled ONNX graph for cfg.model if it doesn't
-    already exist (or always, if force), guarded by a lockfile like
-    ensure_base_model. Only supports input_name == "input_ids" (the
-    text-generation-with-past task assumes token-id input, not
-    inputs_embeds)."""
+    """Exports a KV-cache-enabled ONNX graph for `hf_name` into
+    local_save_dir/kv_cache_export if it doesn't already exist (or always, if
+    force), guarded by a lockfile like ensure_base_model. Only supports
+    input_name == "input_ids" (the text-generation-with-past task assumes
+    token-id input, not inputs_embeds)."""
     if input_name != "input_ids":
         raise ValueError(
             f"{hf_name}: KV-cache export only supports input_name == 'input_ids', "
             f"got {input_name!r}",
         )
 
-    out_dir = local_save_dir / "kv_cache_export"
+    out_dir = kv_cache_export_dir(local_save_dir)
     model_path = out_dir / "model.onnx"
 
     lock_path = out_dir.with_suffix(".kv_cache_export.lock")
