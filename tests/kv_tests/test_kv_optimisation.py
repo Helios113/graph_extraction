@@ -92,7 +92,7 @@ def test_kv_optimisation_matches_torch(cfg, hf, kv, kind, L, opt, loss):
         target = f(torch.from_numpy(y_in + 0.1 * rng.standard_normal(y_in.shape).astype(np.float32)).cuda()).cpu().numpy()
     mask = rng.standard_normal(y0.shape).astype(np.float32)
 
-    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, j, loss)
+    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, j, loss)
     sess = session(pb_path)
     in_names = {i.name for i in sess.get_inputs()}
     outs = [o.name for o in sess.get_outputs()]

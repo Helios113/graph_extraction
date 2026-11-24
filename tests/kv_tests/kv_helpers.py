@@ -90,7 +90,7 @@ def cacheless_sublayer_path(ccfg: ModelConfig, k: int) -> tuple[Path, "object"]:
 def kv_boundaries_session(cfg: ModelConfig):
     """(session over the all-boundaries KV subgraph, boundary tensor names)."""
     ensure_kv_cache_model(cfg.input_name, cfg.model, cfg.dir)
-    path, names, _ = ensure_kv_cache_boundaries(cfg)
+    path, names, _ = ensure_kv_cache_boundaries(cfg.dir, cfg.block_prefix, cfg.sublayers)
     return session(path), names
 
 
@@ -229,7 +229,7 @@ def kv_jacobian(cfg, kv_sess, j_in: int, hidden: np.ndarray, prefix: np.ndarray,
     from construct.kv_cache_subgraph import KV_SUBLAYER_IN, KV_SUBLAYER_OUT, ensure_kv_cache_sublayer_pullback
 
     L = prefix.shape[1]
-    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, j_in, LossType.JacobianExtractorLoss)
+    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, j_in, LossType.JacobianExtractorLoss)
     past = past if past is not None else kv_prefix_past(kv_sess, prefix)
     feeds = kv_sublayer_feeds(sub, np.broadcast_to(hidden, (N_CAND, 1, D_MODEL)), broadcast_past(past, N_CAND), L)
     feeds["mask"] = np.eye(D_MODEL, dtype=np.float32)[:, None, :]

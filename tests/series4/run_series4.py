@@ -170,7 +170,7 @@ def run_model(cfg_path):
     kv_path = ensure_kv_cache_model(cfg.input_name, cfg.model, cfg.dir)
     n_layers, n_kvh, head_dim = kv_dims(kv_path)
     ops = sorted({nd.op_type for nd in onnx.load(str(kv_path), load_external_data=False).graph.node})
-    bpath, bnames, _ = ensure_kv_cache_boundaries(cfg)
+    bpath, bnames, _ = ensure_kv_cache_boundaries(cfg.dir, cfg.block_prefix, cfg.sublayers)
     kv_full, kv_bnd = session(kv_path), session(bpath)
     model = AutoModelForCausalLM.from_pretrained(cfg.model, torch_dtype=torch.float32).cuda().eval()
     model.requires_grad_(False)
@@ -217,7 +217,7 @@ def run_model(cfg_path):
     j_list = sorted({0, 1, 2, 3, 2 * n_layers - 2, 2 * n_layers - 1})
     for j in j_list:
         try:
-            sub, pb = ensure_kv_cache_sublayer_pullback(cfg, j, LossType.JacobianExtractorLoss)
+            sub, pb = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, j, LossType.JacobianExtractorLoss)
             ps = session(pb)
         except Exception as e:  # noqa: BLE001
             fail("jacobian-build", f"j{j}", e)
@@ -245,7 +245,7 @@ def run_model(cfg_path):
     for kind, j in (("attention", 2), ("mlp", 3)):
         for loss in ADV_LOSSES:
             try:
-                sub, pb = ensure_kv_cache_sublayer_pullback(cfg, j, loss)
+                sub, pb = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, j, loss)
                 ps = session(pb)
             except Exception as e:  # noqa: BLE001
                 fail("optimisation-build", f"{kind}|{loss.value}", e)

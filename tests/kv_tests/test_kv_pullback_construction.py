@@ -24,7 +24,7 @@ def cfg():
 @pytest.mark.parametrize("loss_type", LOSSES, ids=lambda l: l.value)
 @pytest.mark.parametrize("kind", J_IN)
 def test_pullback_io_contract(cfg, kind, loss_type):
-    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, J_IN[kind], loss_type)
+    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, J_IN[kind], loss_type)
     sess = session(pb_path)
     inputs = {i.name: i.shape for i in sess.get_inputs()}
     outputs = [o.name for o in sess.get_outputs()]
@@ -43,15 +43,15 @@ def test_pullback_io_contract(cfg, kind, loss_type):
 
 
 def test_pullback_is_cached(cfg):
-    _, p1 = ensure_kv_cache_sublayer_pullback(cfg, 3, LossType.JacobianExtractorLoss)
+    _, p1 = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, 3, LossType.JacobianExtractorLoss)
     mtime = p1.stat().st_mtime_ns
-    _, p2 = ensure_kv_cache_sublayer_pullback(cfg, 3, LossType.JacobianExtractorLoss)
+    _, p2 = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, 3, LossType.JacobianExtractorLoss)
     assert p1 == p2 and p2.stat().st_mtime_ns == mtime
 
 
 def test_pullbacks_do_not_collide_across_loss(cfg):
     paths = {
-        ensure_kv_cache_sublayer_pullback(cfg, 3, l)[1]
+        ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, 3, l)[1]
         for l in (LossType.JacobianExtractorLoss, LossType.AdversarialLoss_SquaredDiffLoss)
     }
     assert len(paths) == 2
@@ -62,7 +62,7 @@ def test_squared_diff_loss_matches_numpy(cfg, kind):
     """loss = sum_d (target - f(y))^2 per row, with f the forward output the pullback also returns."""
     kv_sess, _ = kv_boundaries_session(cfg)
     j_in = J_IN[kind]
-    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg, j_in, LossType.AdversarialLoss_SquaredDiffLoss)
+    sub, pb_path = ensure_kv_cache_sublayer_pullback(cfg.dir, cfg.block_prefix, cfg.d_model, j_in, LossType.AdversarialLoss_SquaredDiffLoss)
     prefix = random_tokens(1, 5, seed=3)
     past_b = broadcast_past(kv_prefix_past(kv_sess, prefix), B)
     rng = np.random.default_rng(0)

@@ -222,7 +222,7 @@ SUBLAYER_CASES = [(0, "embed"), (0, "attn_out"), (0, "mlp_out"), (5, "attn_out")
 
 @pytest.mark.parametrize(("layer", "boundary"), SUBLAYER_CASES)
 def test_extracted_subgraph_matches_hf(cfg, sess, hf_model, tokens, layer, boundary):
-    path, out_name, n_layers = ensure_kv_cache_extra_outputs(cfg, layer, boundary, force=True)
+    path, out_name, n_layers = ensure_kv_cache_extra_outputs(cfg.dir, cfg.block_prefix, layer, boundary, force=True)
     assert n_layers == N_LAYERS
 
     sub = ort.InferenceSession(str(path), providers=PROVIDERS)
@@ -253,7 +253,7 @@ def test_subgraph_with_prefix_cache_matches_full_pass(cfg, sess, tokens):
     """The sweep's use: sublayer activation at the new position from prefix KV
     equals the same activation from a full from-scratch pass."""
     layer, boundary, pos = 5, "attn_out", 3
-    path, out_name, _ = ensure_kv_cache_extra_outputs(cfg, layer, boundary)
+    path, out_name, _ = ensure_kv_cache_extra_outputs(cfg.dir, cfg.block_prefix, layer, boundary)
     sub = ort.InferenceSession(str(path), providers=PROVIDERS)
     in_names = {i.name for i in sub.get_inputs()}
 
@@ -289,7 +289,7 @@ def test_kv_subgraph_matches_cacheless_add_names(cfg, tokens):
 
     for j in check:
         layer, boundary = boundary_for_index(j)
-        path, out_name, _ = ensure_kv_cache_extra_outputs(cfg, layer, boundary)
+        path, out_name, _ = ensure_kv_cache_extra_outputs(cfg.dir, cfg.block_prefix, layer, boundary)
         sub = ort.InferenceSession(str(path), providers=PROVIDERS)
         in_names = {i.name for i in sub.get_inputs()}
         feeds = {"input_ids": ids, "attention_mask": np.ones_like(ids),

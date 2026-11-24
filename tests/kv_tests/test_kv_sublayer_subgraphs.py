@@ -37,8 +37,8 @@ def kv(cfg):
 
 
 def test_sublayer_io_signature(cfg, kv):
-    mlp = ensure_kv_cache_sublayer(cfg, 1)
-    attn = ensure_kv_cache_sublayer(cfg, 2)
+    mlp = ensure_kv_cache_sublayer(cfg.dir, cfg.block_prefix, 1)
+    attn = ensure_kv_cache_sublayer(cfg.dir, cfg.block_prefix, 2)
     assert mlp.layer_idx is None and mlp.extra_inputs == ()
     assert attn.layer_idx == 1
     assert {"past_key_values.1.key", "past_key_values.1.value"} <= set(attn.extra_inputs)
@@ -58,7 +58,7 @@ def test_sublayer_matches_hf_and_cacheless(cfg, hf, kv, prefix_len, j_in):
     hf_out = hf_b[j_in + 1][:, -1].detach().cpu().numpy()
 
     # KV sublayer: last token only, prefix K/V as constants
-    sub = ensure_kv_cache_sublayer(cfg, j_in)
+    sub = ensure_kv_cache_sublayer(cfg.dir, cfg.block_prefix, j_in)
     past_b = broadcast_past(kv_prefix_past(kv_sess, prefix), N_CAND)
     kv_out = session(sub.path).run(
         [KV_SUBLAYER_OUT], kv_sublayer_feeds(sub, hf_in[:, -1:], past_b, prefix_len),

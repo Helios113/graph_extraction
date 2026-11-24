@@ -28,7 +28,6 @@ from pathlib import Path
 
 import onnx
 
-from construct.config import ModelConfig
 from construct.fs_utils import exclusive_lock
 from construct.kv_cache_export import kv_cache_export_dir, kv_cache_export_path
 
@@ -145,27 +144,28 @@ def past_kv_input_names(n_layers: int) -> list[str]:
 
 
 def kv_cache_extra_outputs_path(
-    cfg: ModelConfig, layer_idx: int, boundary: str
+    local_save_dir: Path, layer_idx: int, boundary: str
 ) -> Path:
-    return kv_cache_export_dir(cfg.dir) / f"extra_outputs.layers_{layer_idx}_{boundary}.onnx"
+    return kv_cache_export_dir(local_save_dir) / f"extra_outputs.layers_{layer_idx}_{boundary}.onnx"
 
 
 def ensure_kv_cache_extra_outputs(
-    cfg: ModelConfig,
+    local_save_dir: Path,
+    block_prefix: str,
     layer_idx: int,
     boundary: str,
     force: bool = False,
 ) -> tuple[Path, str, int]:
-    """`boundary` as in sublayer_tensor_name (including "embed"). Extracts (and caches) a subgraph of cfg's KV-cache model whose outputs
+    """`boundary` as in sublayer_tensor_name (including "embed"). Extracts (and caches) a subgraph of the KV-cache model in local_save_dir whose outputs
     are the requested sublayer tensor plus every layer's present KV, dropping
     logits. Returns (subgraph_path, sublayer_output_name, n_layers)."""
-    model_path = kv_cache_export_path(cfg.dir)
+    model_path = kv_cache_export_path(local_save_dir)
     if not model_path.exists():
         raise FileNotFoundError(
             f"{model_path} does not exist -- call ensure_kv_cache_model(...) first",
         )
 
-    output_path = kv_cache_extra_outputs_path(cfg, layer_idx, boundary)
+    output_path = kv_cache_extra_outputs_path(local_save_dir, layer_idx, boundary)
     lock_path = output_path.with_suffix(output_path.suffix + ".lock")
 
     with exclusive_lock(lock_path):
@@ -179,7 +179,7 @@ def ensure_kv_cache_extra_outputs(
         sublayer_output = sublayer_tensor_name(
             layer_idx,
             boundary,
-            check_block_prefix(base_model, cfg.block_prefix),
+            check_block_prefix(base_model, block_prefix),
             base_model,
         )
 
@@ -257,26 +257,27 @@ def _rename_tensor(model: onnx.ModelProto, old: str, new: str) -> None:
 
 
 def kv_cache_sublayer_path(
-    cfg: ModelConfig, j_in: int, out_dir: Path | None = None
+    local_save_dir: Path, j_in: int, out_dir: Path | None = None
 ) -> Path:
     return (
-        out_dir or kv_cache_export_dir(cfg.dir)
+        out_dir or kv_cache_export_dir(local_save_dir)
     ) / f"sublayer.{j_in}.{j_in + 1}.forward.onnx"
 
 
 def ensure_kv_cache_sublayer(
-    cfg: ModelConfig,
+    local_save_dir: Path,
+    block_prefix: str,
     j_in: int,
     out_dir: Path | None = None,
     force: bool = False,
 ) -> KVSublayer:
     """Extracts (and caches) the last-token subgraph for the sublayer between
-    residual boundaries j_in and j_in + 1 from cfg's KV-cache model. Input
-    `hidden_in` (batch, 1, d_model) -> output `hidden_out`; see the section
-    comment above for the other inputs. `out_dir` defaults to the KV-cache
-    export dir (pullback construction passes its own per-config dir so the
-    pullback artifacts don't collide)."""
-    model_path = kv_cache_export_path(cfg.dir)
+    residual boundaries j_in and j_in + 1 from the KV-cache model in
+    local_save_dir. Input `hidden_in` (batch, 1, d_model) -> output `hidden_out`;
+    see the section comment above for the other inputs. `out_dir` defaults to
+    the KV-cache export dir (pullback construction passes its own per-model dir
+    so the pullback artifacts don't collide)."""
+    model_path = kv_cache_export_path(local_save_dir)
     if not model_path.exists():
         raise FileNotFoundError(
             f"{model_path} does not exist -- call ensure_kv_cache_model(...) first"
@@ -284,7 +285,7 @@ def ensure_kv_cache_sublayer(
 
     j_out = j_in + 1
     layer_idx = (j_out - 1) // 2 if j_out % 2 == 1 else None
-    output_path = kv_cache_sublayer_path(cfg, j_in, out_dir)
+    output_path = kv_cache_sublayer_path(local_save_dir, j_in, out_dir)
     lock_path = output_path.with_suffix(output_path.suffix + ".lock")
 
     with exclusive_lock(lock_path):
@@ -297,7 +298,7 @@ def ensure_kv_cache_sublayer(
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         model = onnx.load(str(model_path), load_external_data=False)
-        prefix = check_block_prefix(model, cfg.block_prefix)
+        prefix = check_block_prefix(model, block_prefix)
         in_name = sublayer_tensor_name(*boundary_for_index(j_in), prefix, model)
         out_name = sublayer_tensor_name(*boundary_for_index(j_out), prefix, model)
         original_inputs = [i.name for i in model.graph.input]
@@ -332,7 +333,9 @@ def ensure_kv_cache_sublayer(
 
 
 def ensure_kv_cache_sublayer_pullback(
-    cfg: ModelConfig,
+    local_save_dir: Path,
+    block_prefix: str,
+    d_model: int,
     j_in: int,
     loss_type,
     force: bool = False,
@@ -346,8 +349,8 @@ def ensure_kv_cache_sublayer_pullback(
     from construct.fs_utils import _strip_last_quantifier
     from construct.pullback import generate_subgraph_pullback
 
-    work_dir = kv_cache_export_dir(cfg.dir) / f"pullback_{loss_type.value}"
-    sub = ensure_kv_cache_sublayer(cfg, j_in, out_dir=work_dir, force=force)
+    work_dir = kv_cache_export_dir(local_save_dir) / f"pullback_{loss_type.value}"
+    sub = ensure_kv_cache_sublayer(local_save_dir, block_prefix, j_in, out_dir=work_dir, force=force)
     pullback_path = sub.path.with_name(
         _strip_last_quantifier(sub.path.stem) + ".pullback.onnx"
     )
@@ -357,7 +360,7 @@ def ensure_kv_cache_sublayer_pullback(
             generate_subgraph_pullback(
                 sub.path,
                 loss_type,
-                [1, 1, cfg.d_model],  # only dims [1:] are used; the batch axis is symbolic
+                [1, 1, d_model],  # only dims [1:] are used; the batch axis is symbolic
                 KV_SUBLAYER_IN,
                 KV_SUBLAYER_OUT,
             )
@@ -365,18 +368,18 @@ def ensure_kv_cache_sublayer_pullback(
 
 
 def ensure_kv_cache_boundaries(
-    cfg: ModelConfig,
+    local_save_dir: Path,
+    block_prefix: str,
+    sublayers: list,
     force: bool = False,
 ) -> tuple[Path, list[str], int]:
     """Like ensure_kv_cache_extra_outputs, but one subgraph whose outputs are *every* residual
-    boundary of the config (index j == boundary_for_index(j), so the j-th name lines up with
-    cfg.sublayers[j].output) followed by every layer's present K/V. Returns
+    boundary (index j == boundary_for_index(j), so the j-th name lines up with
+    sublayers[j].output) followed by every layer's present K/V. Returns
     (path, boundary_tensor_names, n_layers)."""
 
-    out_dir = kv_cache_export_dir(cfg.dir)
-    model_path = kv_cache_export_path(cfg.dir)
-    block_prefix = cfg.block_prefix
-    sublayers = cfg.sublayers
+    out_dir = kv_cache_export_dir(local_save_dir)
+    model_path = kv_cache_export_path(local_save_dir)
     output_path = out_dir / "extra_outputs.all_boundaries.onnx"
 
     if not model_path.exists():

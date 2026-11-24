@@ -89,7 +89,7 @@ def hf():
 @pytest.fixture(scope="module")
 def kv_runner(cfg):
     kv_boundaries_session(cfg)
-    path, out_name, n_layers = ensure_kv_cache_extra_outputs(cfg, 11, "mlp_out")  # boundary 24
+    path, out_name, n_layers = ensure_kv_cache_extra_outputs(cfg.dir, cfg.block_prefix, 11, "mlp_out")  # boundary 24
     return GpuRunner(path), out_name
 
 
